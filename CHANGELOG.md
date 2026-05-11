@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-11 — asset-type conventions baked into SKILL.md
+
+### Fixed / Added
+
+`skills/asset-pipeline/SKILL.md` now includes three concrete rule sections that AI image generators violate by default unless explicitly constrained. Each section ends with a mandatory verification step (read the output, check the rules, recommend regenerate if they fail — do NOT gloss with "looks good" without naming what was verified).
+
+- **Sprite Sheet Conventions** — uniform cell size, consistent character bounding box and bottom-center anchor, VFX containment within cells, style/palette consistency across frames. Standard frame counts (idle 4-8 / walk 4-8 / attack 4-6 / hurt 2-3 / death 4-8) and direction conventions (1-dir for Vampire-Survivors-style, 4-dir for top-down RPG; left/right mirrored in-engine so don't generate both sides).
+- **UI Icon Sheet Conventions** — uniform cell, live-area padding (~75-85% of cell), identical stroke weight, optical alignment (not just bounding-box alignment), transparent backgrounds, multi-state alignment (icon stays in same position across normal/hover/pressed/disabled). Standard cell sizes (24/32/48/64/96/128 by use case) and grouping rule (one coherent set per sheet, never mix unrelated icons).
+- **VFX Sheet Conventions** — uniform cell, alpha containment within cell, center-pivot anchoring, alpha lifecycle (opaque → fade for one-shots; first/last must match for loops), looping continuity. Standard frame counts by effect type (hit 4-6 / explosion 8-12 / beam 4-8 looping / aura 8-12 looping / level-up 6-8 one-shot / death-dissolve 4-8 one-shot).
+- **Number / Bitmap Font Sheet Conventions** — required glyph sets (minimum 0-9, standard adds `. - +`, extended adds `, / × !`), monospace recommended for easier runtime layout, uniform cell + shared baseline (all digits the same height), identical stroke weight across all glyphs, outline/shadow for readability on busy backgrounds, per-variant rows for damage/crit/heal/shield/miss (same glyph order across rows, only color changes). Standard cell sizes by use case (HUD scores 16-24 / damage numbers 32-48 / big crit 64-96).
+
+`skills/style-gen/SKILL.md` gets a shorter mirror of the sprite sheet rules for direct style-gen sheet invocations.
+
+GUIDE.md updated to mention the sprite-sheet conventions section.
+
+### Motivation
+
+The first real asset-pipeline test (2026-05-11) produced a sprite sheet where cell anchors drifted between idle/walk/attack/death rows and VFX trails spilled outside their cells, and I (the agent) presented it as "OK" without actually scrutinizing the result. The user caught both the asset issue AND the verification gap. This release moves the rules from tribal knowledge into the SKILL.md so future invocations don't repeat the mistake — and adds a mandatory verification step so the agent must inspect and critique its own output before claiming success.
+
+Sources for the rules: Unity Sprite Editor docs, Slynyrd Pixelblog (top-down character animation), Aseprite pivot conventions, design system iconography guides, particle/flipbook standards from PlayCanvas/Unity/Effekseer.
+
 ## [0.3.0] - 2026-05-11 — asset-pipeline orchestrator
 
 ### Added

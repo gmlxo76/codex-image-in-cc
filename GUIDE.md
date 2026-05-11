@@ -249,6 +249,40 @@ OK imagegen skill: C:\Users\<...>\.codex\skills\.system\imagegen\SKILL.md
 ### 4. Codex 동시 호출 불가
 `asset-pipeline`은 **순차 실행 강제**. 병렬로 여러 style-gen을 동시에 호출하면 codex CLI 세션이 충돌함.
 
+### 5. 에셋 타입별 룰 (v0.3.1 이후)
+AI 생성기는 기본적으로 셀별로 크기/위치/이펙트가 제각각인 그리드를 만듭니다. v0.3.1부터 `asset-pipeline` SKILL.md에 다음 세 룰 섹션이 박혀있고, **각 섹션 끝에 생성 후 검증 단계가 의무화**되어 있어요:
+
+**스프라이트 시트** (캐릭터/적/일반 sprite):
+- 모든 셀 동일 크기 (게임엔진이 `cell × index`로 자르니 필수)
+- 모든 스프라이트 동일 anchor (지면 캐릭터는 bottom-center, 발 위치 동일 Y)
+- VFX 트레일은 셀 경계 안
+- 표준 프레임 수: idle 4-8f / walk 4f or 8f / attack 4-6f / hurt 2-3f / death 4-8f
+- 방향: Vampire-Survivors-style은 1-dir or 2-dir (엔진 좌우 미러), 톱다운 RPG는 4-dir
+
+**UI 아이콘 시트**:
+- 모든 셀 동일 크기 (24/32/48/64/96/128 표준)
+- live-area padding (각 아이콘은 셀의 ~75-85% 차지, edge 안 닿게)
+- 동일 stroke weight + 동일 style (filled vs outlined 섞으면 안 됨)
+- 투명 배경, optical alignment (bounding-box alignment 아님)
+- 다중 상태 (normal/hover/pressed) 시 위치 동일
+
+**VFX 시트**:
+- 모든 셀 동일 크기 (보통 128/192/256)
+- center-pivot (캐릭터처럼 bottom 아니라 중앙 기준)
+- alpha containment — 셀 경계 밖으로 파편/글로우 안 나감
+- alpha lifecycle — one-shot은 불투명 → 페이드아웃, looping은 첫/끝 프레임 매칭
+- 표준 프레임 수: hit 4-6f / explosion 8-12f / beam 4-8f looping / aura 8-12f looping / level-up 6-8f one-shot
+
+**숫자 / 비트맵 폰트 시트** (데미지 숫자, 점수, 타이머 등):
+- 최소 글리프 셋: `0-9` 10개, 표준: `+ . -` 추가, 확장: `, / × !` 추가
+- 모노스페이스 권장 (런타임 레이아웃이 훨씬 쉬워짐)
+- 모든 셀 동일 크기, 모든 글리프 동일 베이스라인 (`8`이 `1`보다 키 크면 안 됨)
+- 동일 stroke weight, 동일 outline 두께
+- 다중 variant (normal/crit/heal/shield/miss) 시 → 한 row에 한 variant. 글리프 순서는 모든 row 동일, 색만 변함
+- 표준 셀 크기: HUD score 16-24 / 데미지 숫자 32-48 / 큰 크리티컬 64-96
+
+이 제약이 자동으로 style-gen 프롬프트에 들어가고, 생성 후 검증 단계도 의무화됨. AI 한계상 완벽하진 않으니 결과를 항상 확인하세요.
+
 ### 5. Windows + Node 22+ spawning 이슈
 플러그인이 자동 우회 (`%APPDATA%\npm\node_modules\@openai\codex\bin\codex.js` 직접 실행). 사용자가 신경 안 써도 됨.
 

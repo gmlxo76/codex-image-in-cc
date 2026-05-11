@@ -31,5 +31,15 @@ v0.3.0 (2026-05-11):
 - Updated renderStatusReport usage lines and dispatcher usage() to list the
   new commands.
 
+v0.3.1 (2026-05-11):
+- Sprite sheet generation rules baked into skills/asset-pipeline/SKILL.md
+  (Sprite Sheet Conventions section): uniform cell size, anchored sprites,
+  contained VFX, consistent style across frames, standard frame counts,
+  1/4/8-direction conventions. Mandatory verification step after each sheet.
+- skills/style-gen/SKILL.md gets a shorter mirror of the rules for direct
+  style-gen sheet invocations.
+- Motivated by a real test where the first generated sprite sheet had
+  drifting anchors and effect overflow across rows.
+
 The original LICENSE file (Apache-2.0) is preserved unchanged in this
 distribution as required by Section 4 of the license.
