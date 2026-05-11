@@ -8,11 +8,15 @@ allowed-tools: Bash(node:*)
 
 The first whitespace-separated token in the arguments is the **reference image path** (used as a style/composition/mood reference only — never edited or returned). The rest is the generation prompt describing the new subject and any size/output-path/quality details in natural language. Quote the path if it contains spaces (e.g. `"my reference.png" draw a coin in this style ...`).
 
+**Attached-image shortcut:** if the user attached an image via the chat UI instead of typing a path, `$ARGUMENTS` will start with a `[Image #N]` placeholder. The actual file path appears nearby in the message as image metadata: `[Image: source: <absolute-path>]`. Substitute the placeholder with that resolved path before invoking the dispatcher (the rest of `$ARGUMENTS` stays as the prompt).
+
 Run:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-image.mjs" style-gen "$ARGUMENTS"
 ```
+
+(If you substituted an attached-image placeholder, replace `"$ARGUMENTS"` above with `"<resolved-abs-path> <rest of arguments>"` — same two-token shape.)
 
 Output rules:
 - Show the command stdout to the user verbatim — Codex prints one `SAVED: <absolute path>` line per saved image.

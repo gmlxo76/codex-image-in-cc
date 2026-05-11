@@ -193,6 +193,8 @@ function renderStatusReport(report) {
   lines.push("Usage:");
   lines.push('  /codex-image:generate "A watercolor moonlit library, save to images/library.png at 1024x1024"');
   lines.push('  /codex-image:edit input.png "Replace the background with a clean white studio backdrop"');
+  lines.push('  /codex-image:style-gen reference.png "A coin in this exact style, transparent bg, save to assets/coin.png at 512x512"');
+  lines.push('  /codex-image:asset-pipeline reference.png "RPG mobile game: 5 enemies + 10 items + 4 backgrounds"');
   lines.push("");
   lines.push("Cost note: image generation runs a Codex agent turn and uses the Codex built-in image generation tool.");
 
@@ -333,6 +335,25 @@ async function handleEdit(argv) {
   }
 }
 
+function handleParseArgs(argv) {
+  const raw = argv.join(" ").trim();
+  const { input, prompt } = splitFirstToken(raw);
+  if (!input || !prompt) {
+    console.error("Usage: /codex-image:asset-pipeline <reference-path> <project context description>");
+    process.exitCode = 1;
+    return;
+  }
+  const cwd = process.cwd();
+  const inputPath = path.resolve(cwd, input);
+  if (!fs.existsSync(inputPath)) {
+    console.error(`Reference image not found: ${inputPath}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`REF: ${inputPath}`);
+  console.log(`CONTEXT: ${prompt}`);
+}
+
 async function handleStyleGen(argv) {
   const raw = argv.join(" ").trim();
   const { input, prompt } = splitFirstToken(raw);
@@ -391,12 +412,14 @@ function usage() {
     "  generate <natural-language image request>           Dispatch a generate request to Codex's imagegen skill",
     "  edit <input-path> <edit instructions>               Dispatch an edit request to Codex's imagegen skill (codex exec --image)",
     "  style-gen <reference-path> <generate instructions>  Generate a new image whose visual style matches an attached reference",
+    "  parse-args <reference-path> <context>               Validate asset-pipeline arguments (prints REF/CONTEXT lines)",
     "",
     "Each command is also exposed as a Claude Code plugin skill:",
     "  /codex-image:status",
     "  /codex-image:generate <...>",
     "  /codex-image:edit <input-path> <...>",
-    "  /codex-image:style-gen <reference-path> <...>"
+    "  /codex-image:style-gen <reference-path> <...>",
+    "  /codex-image:asset-pipeline <reference-path> <project context>   (orchestrates style-gen for a planned asset batch)"
   ].join("\n");
 }
 
@@ -426,6 +449,11 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === "style-gen") {
     await handleStyleGen(rest);
+    return;
+  }
+
+  if (command === "parse-args") {
+    handleParseArgs(rest);
     return;
   }
 

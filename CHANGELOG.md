@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-11 — asset-pipeline orchestrator
+
+### Added
+
+- `/codex-image:asset-pipeline <reference-path> <project context>` — high-order orchestration of `/codex-image:style-gen`. Given a locked style reference and a project context (e.g. "RPG mobile game with 5 enemies + 10 items"), the Claude Code agent plans the asset list, confirms it with the user, saves a `manifest-<UTC>.json`, and runs `style-gen` once per item. For batches over 10 items, a **sample-first** gate generates the first 3 and asks the user to confirm before continuing — designed to avoid burning a full batch on a mismatched style.
+- `parse-args` dispatcher subcommand — tiny arg validator (path/context split + exists check) used by the asset-pipeline skill at step 1.
+- `skills/asset-pipeline/SKILL.md` with the full step-by-step orchestration (parse → plan → confirm → save manifest → sample-first → execute → report). Planning is done by the Claude Code agent itself (no Codex turn) so token cost lives entirely in generation.
+- `renderStatusReport` now lists `style-gen` and `asset-pipeline` in its Usage examples.
+- All three path-taking skills (`edit`, `style-gen`, `asset-pipeline`) now document the `[Image #N]` attached-image shortcut — when the user attaches an image via the chat UI, Claude Code passes a placeholder in `$ARGUMENTS` and exposes the real path as `[Image: source: <abs-path>]` metadata; the skills now instruct the agent to substitute that resolved path before invoking the dispatcher.
+- `GUIDE.md` — comprehensive Korean usage guide (install, all five commands, typical workflow, known limits, troubleshooting).
+
+### Notes
+
+- Planning intentionally does **not** call Codex — planning is text-only reasoning that the Claude Code agent can do for free. Codex turns are reserved for image generation. A 30-item batch is ≈ 30 Codex turns total.
+- The asset-pipeline skill is sequential by design — parallel style-gen calls would compete for the shared Codex CLI session.
+
 ## [0.2.0] - 2026-05-11 — fork by gmlxo76
 
 ### Added

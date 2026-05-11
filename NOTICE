@@ -10,13 +10,26 @@ This product is a derivative work of:
 Licensed under the Apache License, Version 2.0 (the "License").
 
 Modifications made by gmlxo76:
+
+v0.2.0 (2026-05-11):
 - Added /codex-image:style-gen command for generating new images whose visual
   style matches an attached reference image. The reference is attached via
   `codex exec --image` and role-labeled as a style reference (not an edit
   target), per the Codex imagegen skill's role classification.
 - New STYLE_GEN_INSTRUCTION_PREFIX in scripts/codex-image.mjs.
 - New skills/style-gen/SKILL.md.
-- Bumped to version 0.2.0.
+
+v0.3.0 (2026-05-11):
+- Added /codex-image:asset-pipeline command — high-order orchestration of
+  style-gen for batch asset production. The Claude Code agent plans an asset
+  list from a project context, confirms with the user, saves a manifest, and
+  runs style-gen sequentially per item with a sample-first gate above 10
+  items.
+- New `parse-args` dispatcher subcommand (arg validator used by the
+  asset-pipeline skill).
+- New skills/asset-pipeline/SKILL.md.
+- Updated renderStatusReport usage lines and dispatcher usage() to list the
+  new commands.
 
 The original LICENSE file (Apache-2.0) is preserved unchanged in this
 distribution as required by Section 4 of the license.
