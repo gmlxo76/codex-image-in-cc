@@ -1,0 +1,21 @@
+{
+  "name": "codex-image-in-cc",
+  "owner": {
+    "name": "gmlxo76",
+    "url": "https://github.com/gmlxo76"
+  },
+  "metadata": {
+    "description": "Claude Code plugin that generates, edits, and style-references new images through Codex CLI's built-in imagegen skill. Fork of KingGyuSuh/codex-image-in-cc with added style-gen command.",
+    "version": "0.2.0"
+  },
+  "plugins": [
+    {
+      "name": "codex-image",
+      "source": "./",
+      "description": "Generate, edit, and style-reference new images from Claude Code by dispatching to Codex CLI's built-in imagegen skill.",
+      "version": "0.2.0",
+      "tags": ["codex", "image-generation", "imagegen", "claude-code", "style-reference"],
+      "category": "productivity"
+    }
+  ]
+}

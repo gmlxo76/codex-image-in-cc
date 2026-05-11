@@ -1,0 +1,22 @@
+codex-image-in-cc (gmlxo76 fork)
+Copyright 2026 gmlxo76
+
+This product is a derivative work of:
+
+  codex-image-in-cc
+  Copyright 2026 KingGyuSuh
+  https://github.com/KingGyuSuh/codex-image-in-cc
+
+Licensed under the Apache License, Version 2.0 (the "License").
+
+Modifications made by gmlxo76:
+- Added /codex-image:style-gen command for generating new images whose visual
+  style matches an attached reference image. The reference is attached via
+  `codex exec --image` and role-labeled as a style reference (not an edit
+  target), per the Codex imagegen skill's role classification.
+- New STYLE_GEN_INSTRUCTION_PREFIX in scripts/codex-image.mjs.
+- New skills/style-gen/SKILL.md.
+- Bumped to version 0.2.0.
+
+The original LICENSE file (Apache-2.0) is preserved unchanged in this
+distribution as required by Section 4 of the license.
