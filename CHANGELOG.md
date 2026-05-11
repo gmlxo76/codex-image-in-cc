@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-05-11 — layer separation + 9-slice rules
+
+### Added to `skills/asset-pipeline/SKILL.md`
+
+- **CRITICAL: Layer separation — content vs container** — UI must be authored as separated layers, never flattened. Buttons separate frame from label (for i18n), progress bars separate track from fill (for animation), orbs separate frame from liquid, slots separate frame from item icon, counters separate panel from icon and from number digits, cards separate frame from portrait and from name-plate text, locked variants separate base art from padlock overlay. Decision table maps each common component to its required layer breakdown.
+- **CRITICAL: 9-slice scaling** — frames/buttons/panels that the engine resizes must be designed with fixed decorative corners, stretchable repeatable edges, and a solid/tileable center. Prompts for resizable container assets must explicitly include 9-slice design guidance.
+- **Practical manifest implications** — for every visible composite, the manifest must list multiple items (container + each content layer). Verification step expanded: no language-specific text baked into UI elements (logo branding is exempt), no fill levels baked into bars/orbs, no specific item icons baked into slots, frames intended for resizing have decorative corners and repeatable edges.
+
+### Motivation
+
+During the MVP asset-pipeline run, the agent generated several UI sheets (`hud-orbs`, `hud-panels`, `buttons`, `map-nodes`, `weapons`) with content fully baked into containers — red liquid painted inside the HP orb at a fixed %, "START HUNT"/"OPTIONS" text baked into button images, padlock icons painted onto locked map nodes, weapon icons embedded inside slot frames. The user (gmlxo76) pointed out that none of these are usable in a real shipping game: localization requires text on a separate layer, runtime fill animation requires bar background separate from fill, and runtime equip requires slot separate from item icon. The user then asked the rule be generalized and codified into the SKILL.md so future invocations don't repeat the mistake.
+
+Sources for the rules: Gridly game UI localization best practices, Unity Localization documentation, Unity Manual 9-slicing, GameMaker 9-slice docs.
+
 ## [0.3.2] - 2026-05-11 — infer beyond reference (universal) + UI granularity rules
 
 ### Added to `skills/asset-pipeline/SKILL.md`

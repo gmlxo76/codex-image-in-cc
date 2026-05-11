@@ -58,5 +58,22 @@ v0.3.2 (2026-05-11):
   called them out individually, then explicitly asked the rule generalize
   beyond games to "anything — whatever the reference depicts."
 
+v0.3.3 (2026-05-11):
+- Asset-pipeline SKILL.md adds two CRITICAL sections:
+  (1) Layer separation — content vs container: UI elements must be authored
+      as separate layers (button frame vs label text, progress bar track vs
+      fill, orb frame vs liquid, slot frame vs item icon, counter panel vs
+      icon vs number digits). Baking content into containers breaks i18n,
+      runtime animation, and data-driven content swapping. Includes
+      decision table mapping each component to required layer breakdown.
+  (2) 9-slice scaling: frames/buttons/panels designed for engine resizing
+      must have fixed decorative corners, stretchable repeatable edges,
+      and a solid/tileable center.
+- Verification step expanded to catch baked text, baked fill levels, and
+  baked item icons.
+- Motivated by the MVP test where multiple UI sheets had content
+  fully baked into containers, making them unusable in a real shipping
+  game. User asked the rule generalize and codify into SKILL.md.
+
 The original LICENSE file (Apache-2.0) is preserved unchanged in this
 distribution as required by Section 4 of the license.

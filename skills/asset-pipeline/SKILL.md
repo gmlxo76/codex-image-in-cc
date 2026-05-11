@@ -84,6 +84,52 @@ Note in the manifest's `inferred: true` field which items came from logical infe
 
 UI is almost always the most under-counted category. A single in-game screen typically implies 10-15 distinct UI sheets (logo/typography, button states, frames, HUD orbs, HUD panels, weapon-slot frame, weapon icons, blessing/skill icons, card frames, stat indicators, damage number font, section icons, map nodes, etc.). When the reference shows ANY UI, your plan should reflect that granularity — don't group everything into a single "ui-misc" sheet.
 
+#### CRITICAL: Layer separation — content vs container
+
+UI elements must be authored as SEPARATED LAYERS that the game engine composites at runtime, not as flattened images. Anything that CHANGES at runtime — text, fill levels, item-in-slot, icon-in-frame, badge-on-state, count digits — must be on its own asset, separate from the static container. Without this, the product is impossible to localize, animate, or make data-driven.
+
+| Component | WRONG (baked into single image) | RIGHT (separated layers) |
+|---|---|---|
+| Button | Frame + "START HUNT" text in one image | (a) button frame (multi-state) + (b) text rendered by engine text system at runtime — enables i18n/localization |
+| Progress bar (HP/EXP/mana) | Frame with fill drawn at fixed % | (a) empty track background + (b) fillable bar (tintable strip or pre-colored fill texture) — enables animated fill |
+| Liquid orb | Liquid baked at certain % | (a) orb frame with transparent center + (b) liquid fill texture (clipped/masked at runtime) |
+| Inventory / skill / weapon slot | Item icon baked into slot frame | (a) slot frame (multi-state: normal/equipped/levelup/locked) + (b) each item icon as separate sprite — enables runtime equipping |
+| HUD counter (kills, gold, gems) | Number digits + icon + frame all in one | (a) panel frame + (b) icon (separate) + (c) number rendered by engine using bitmap-font sheet |
+| Card with portrait | Portrait painted inside frame | (a) card frame (multi-state) + (b) portrait + (c) name-plate text rendered at runtime |
+| Locked / disabled variant | Padlock painted onto base art | (a) base art + (b) padlock + dim-overlay applied at runtime as a tint or sprite stack |
+| Node / map marker with state | Node art with state-specific decoration baked | (a) node base + (b) state overlay (padlock for locked, glow for active) on separate layer |
+
+#### CRITICAL: 9-slice scaling for resizable frames
+
+Frames, buttons, and panels that the engine resizes (button widths varying with label length; panel sizes varying with content) MUST be designed for 9-slice scaling:
+
+- **Four corners stay fixed** in size — make them distinct and decorative.
+- **Top/bottom edges** stretch or tile horizontally — design as repeatable horizontal patterns.
+- **Left/right edges** stretch or tile vertically — design as repeatable vertical patterns.
+- **Center area** stretches both ways — design as solid or tileable, never with a baked-in motif that would distort.
+
+When the prompt asks for a frame/button/panel sprite, the prompt MUST say: "designed for 9-slice scaling — decorative corners, simple repeatable edges, solid or tileable center, no central motif that would distort when stretched."
+
+#### Practical implications for the manifest
+
+When planning any UI sheet for the manifest:
+- For every visible composite (button-with-label, slot-with-item, orb-with-fill, counter-with-number), list TWO+ items: the container AND each content layer separately.
+- Number-display areas: empty in the panel sheet (no digits baked) — digits live on a separate bitmap font sheet.
+- Text labels: empty in the button sheet (no text baked) — text rendered by engine.
+- Fill bars/orbs: empty containers OR separate tintable fill strips.
+- Item slots: slot frame only — item icons on their own sheet, composited at runtime.
+
+#### Verification step (MANDATORY after each layered UI sheet)
+
+After generation, verify in addition to the per-type rules:
+1. No language-specific text baked into any button/UI element (logo branding text is OK; UI labels like "OPTIONS"/"BESTIARY" are NOT — those should be empty plate frames).
+2. No fill levels baked into any progress bar / orb / gauge (empty containers only, OR separate fill textures).
+3. No specific item icons baked into slots (slot frame only; item icons live on a separate sheet).
+4. Frames intended for resizing have decorative corners and repeatable edges (9-slice friendly).
+5. Variant states (normal/hover/pressed/locked) on the SAME container, but separated from any content layers.
+
+If any baked content is found where it should be a layer, regenerate as separated layers and add the missing layer sheet(s) to the manifest.
+
 
 
 Each asset is an object with:
