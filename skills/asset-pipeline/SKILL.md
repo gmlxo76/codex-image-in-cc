@@ -50,6 +50,42 @@ On failure (missing args, missing reference file), exit code is non-zero and std
 
 Based on the CONTEXT string, propose a concrete asset list **yourself** (do not call Codex for this — Codex turns are for image generation only, planning is text-only reasoning).
 
+#### CRITICAL: Infer beyond the reference (universal rule — every domain, not just games)
+
+Do NOT limit the plan to what is literally visible in the reference image. Whatever the reference depicts — game, SaaS dashboard, e-commerce page, mobile app, restaurant menu, banking flow — a real shipping product needs many assets that aren't in any single screenshot. **You must explicitly include the contextually-obvious assets that the reference IMPLIES, even when invisible.**
+
+For every reference, ask this question for every visible element:
+> "If a user actually used this product, what other screens / states / assets must exist around this one? What does this screen logically connect to? What error/empty/loading states does it have? What lifecycle events trigger which screens?"
+
+Whatever you'd answer "obviously also exists" — add it to the manifest.
+
+Examples across domains:
+
+| Reference depicts… | You must also plan for (even if not shown) |
+|---|---|
+| Any game (any genre) | game-over screen, pause menu, options menu, loading screen, splash/studio logo, credits screen |
+| RPG / action / survival | bestiary, upgrade tree, status-effect icons (buff/debuff), achievement badges, tooltip frames, tutorial overlays |
+| Any UI button that names a destination (BESTIARY, UPGRADES, OPTIONS, etc.) | that destination screen itself |
+| Any combat or interaction | damage-number font, hit/death VFX, full skill/weapon icon roster (not just visible slots), warning UI |
+| Mobile app (any kind) | onboarding flow, empty-state and error-state screens, permission prompts, settings, profile, notifications |
+| Web product (any kind) | 404 page, loading skeletons, modal/dialog frames, toast notifications, footer, search results, empty states |
+| E-commerce | cart, checkout, account, order confirmation, shipping/tracking, wishlist, search filters, product detail variations |
+| SaaS dashboard | login/signup, password reset, billing/plan, profile, team members, notifications, admin panel, audit log |
+| Form / data entry | success state, validation error states (per field), loading state, "are you sure" confirmation |
+| Banking / fintech | transaction history, biometric/2FA, security warnings, fraud alerts, account switch |
+| Social / messaging | notification badges, presence indicators, typing indicator, read receipts, empty inbox state |
+| Marketing landing | header navigation, footer, contact/CTA, pricing, FAQ, social proof, 404 |
+
+**Rule of thumb:** any time a real user would expect to reach a screen/asset that isn't in the reference, plan it. If a button names it ("BESTIARY"), the destination exists. If a flow implies it ("pause" exists because the game is real-time), the pause menu exists. If an error can occur ("login form"), the error state exists.
+
+Note in the manifest's `inferred: true` field which items came from logical inference vs. direct reference observation, so the user can trim if they want minimal scope.
+
+#### CRITICAL: Don't under-spec UI
+
+UI is almost always the most under-counted category. A single in-game screen typically implies 10-15 distinct UI sheets (logo/typography, button states, frames, HUD orbs, HUD panels, weapon-slot frame, weapon icons, blessing/skill icons, card frames, stat indicators, damage number font, section icons, map nodes, etc.). When the reference shows ANY UI, your plan should reflect that granularity — don't group everything into a single "ui-misc" sheet.
+
+
+
 Each asset is an object with:
 - `name` — short kebab-case identifier (e.g. `"sword-of-flames"`)
 - `category` — one of `character`, `enemy`, `item`, `ui`, `background`, `icon`, `illustration`, `splash`, `app-icon`, `other`

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-11 — infer beyond reference (universal) + UI granularity rules
+
+### Added to `skills/asset-pipeline/SKILL.md`
+
+- **CRITICAL: Infer beyond the reference (universal rule, every domain)** — the agent must NOT limit the plan to literally-visible assets. Whatever the reference depicts — game, SaaS dashboard, e-commerce page, mobile app, restaurant menu, banking flow — a real shipping product needs many assets that aren't in any single screenshot. For every visible element the agent must ask "what other screens/states/assets must exist around this one?" and add whatever it answers "obviously also exists" to the manifest. Includes a multi-domain checklist (game / RPG / mobile / web / e-commerce / SaaS / forms / banking / social / marketing) of unseen-but-required assets to add. Items inferred from logic rather than observed in the reference are flagged `inferred: true` so the user can trim if they want minimal scope.
+- **CRITICAL: Don't under-spec UI** — a single in-product screen typically implies 10-15 distinct UI sheets (logo/typography, button states, frames, panels, icons, indicators, etc.). When the reference shows any UI, the plan must reflect that granularity — never group everything into a single "ui-misc" bucket.
+
+### Motivation
+
+During the asset-pipeline test on 2026-05-11, the agent under-planned five times in a row (10 → 20 → 24 → 26 → 40 items), each time missing entire categories — at first only "2 enemy types and 1 tileset", then conflating portraits with sprite-sheets, then missing 80% of the UI elements visible in the reference, then missing genre-essential screens (game-over / pause / options / bestiary / upgrades) that weren't visible at all but every shipping product has. The user had to call out each under-spec individually, then explicitly request the rule generalize to "any product, not just games — whatever the reference depicts, infer the surrounding screens/states a real user would expect." These two rules move that principle from tribal knowledge into the SKILL.md so future invocations don't repeat the under-spec pattern.
+
 ## [0.3.1] - 2026-05-11 — asset-type conventions baked into SKILL.md
 
 ### Fixed / Added

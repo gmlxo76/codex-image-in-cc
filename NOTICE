@@ -41,5 +41,22 @@ v0.3.1 (2026-05-11):
 - Motivated by a real test where the first generated sprite sheet had
   drifting anchors and effect overflow across rows.
 
+v0.3.2 (2026-05-11):
+- Asset-pipeline planning rules in SKILL.md now require inferring beyond
+  the reference UNIVERSALLY (every domain, not just games — SaaS dashboards,
+  e-commerce, mobile apps, banking, social, restaurant menus all get the
+  same treatment). The agent must ask, for every visible element, "what
+  other screens/states/assets must exist around this one?" and plan
+  whatever it answers "obviously also exists." Includes multi-domain
+  checklist of conventional unseen-but-required assets to add.
+- Explicitly warns against under-spec'ing UI (a single in-product screen
+  typically implies 10-15 UI sheets — never group into one "ui-misc"
+  bucket).
+- Inferred items flagged `inferred: true` in manifest so the user can trim.
+- Motivated by five consecutive under-spec passes during the asset-pipeline
+  test where the agent missed entire asset categories until the user
+  called them out individually, then explicitly asked the rule generalize
+  beyond games to "anything — whatever the reference depicts."
+
 The original LICENSE file (Apache-2.0) is preserved unchanged in this
 distribution as required by Section 4 of the license.
