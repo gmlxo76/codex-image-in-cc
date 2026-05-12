@@ -386,6 +386,27 @@ async function handleStyleGen(argv) {
   }
 }
 
+function handleOrganize(argv) {
+  const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "organize.py");
+  const py = process.platform === "win32" ? "python" : "python3";
+  const result = spawnSync(py, [scriptPath, ...argv], {
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  if (result.error && result.error.code === "ENOENT") {
+    console.error(
+      "organize: Python interpreter not found.\n" +
+      "Install Python 3:\n" +
+      "  Windows: https://www.python.org/downloads/\n" +
+      "  macOS:   `brew install python3`\n" +
+      "  Linux:   `apt install python3`"
+    );
+    process.exitCode = 2;
+    return;
+  }
+  process.exitCode = result.status ?? 0;
+}
+
 function handleSlice(argv) {
   // Manifest mode: --manifest <path> [--output-dir <dir>] [--only <name,name,...>]
   //   Reads the manifest, iterates items with kind == "atlas", and slices each
@@ -546,6 +567,10 @@ function usage() {
     "                                                      and writes per-atlas output dirs (one PNG per cell + atlas.json sidecar each).",
     "  verify-atlas <input.png> --grid CxR --safe-margin N [--cell-w N --cell-h N]",
     "                                                      Verify atlas sheet contents respect safe margin; reports violations",
+    "  organize <manifest.json> --output-dir <dir> [--no-sliced]",
+    "                                                      Reorganize an asset-pipeline manifest into kind-first layout",
+    "                                                      (atlas/<name>/, sprite-sheet/, tileset/{floor,objects}/, vfx-sheet/,",
+    "                                                      font-sheet/, fill-texture/, single/<sub>/). Writes new manifest.",
     "",
     "Each command is also exposed as a Claude Code plugin skill:",
     "  /codex-image:status",
@@ -553,7 +578,8 @@ function usage() {
     "  /codex-image:edit <input-path> <...>",
     "  /codex-image:style-gen <reference-path> <...>",
     "  /codex-image:asset-pipeline <reference-path> <project context>   (orchestrates style-gen for a planned asset batch)",
-    "  /codex-image:slice <input.png> <output-dir> <grid spec>          (slice atlas sheet into per-cell PNGs)"
+    "  /codex-image:slice <input.png> <output-dir> <grid spec>          (slice atlas sheet into per-cell PNGs)",
+    "  /codex-image:organize <manifest.json> <target-dir>               (reorganize manifest into kind-first engine layout)"
   ].join("\n");
 }
 
@@ -598,6 +624,11 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === "verify-atlas") {
     handleVerifyAtlas(rest);
+    return;
+  }
+
+  if (command === "organize") {
+    handleOrganize(rest);
     return;
   }
 
