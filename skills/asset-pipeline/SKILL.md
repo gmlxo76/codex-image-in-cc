@@ -50,6 +50,87 @@ On failure (missing args, missing reference file), exit code is non-zero and std
 
 Based on the CONTEXT string, propose a concrete asset list **yourself** (do not call Codex for this — Codex turns are for image generation only, planning is text-only reasoning).
 
+#### CRITICAL: Screen-flow + element-size planning FIRST, asset list SECOND
+
+Do not jump straight to "list of PNGs to generate." Real apps/games need a SCREEN-LEVEL design pass first, because the same visual element (a button, an orb, an icon) has a SPECIFIC PIXEL SIZE per screen, and that pixel size determines the asset's source resolution, atlas cell size, and whether it can be shared with another screen.
+
+**Step 0 — Confirm the target viewport BEFORE doing anything else.**
+
+Before planning screens or assets, the agent MUST ask the user which viewport the project targets, because every downstream size calculation depends on it. Use `AskUserQuestion` with the following options (or a subset that fits the context — drop irrelevant ones for the obvious cases, e.g. don't offer "Desktop" when the context string says "iOS app"):
+
+> Question: "What viewport(s) does this project target? Asset sizes (cells,
+> backdrops, icons) depend on this — wrong viewport = wrong asset sizes."
+>
+> Options (header "Viewport"):
+> - Mobile portrait (430×932, iPhone 14 Pro baseline) — RECOMMENDED for most mobile games/apps
+> - Mobile portrait small (390×844 / 360×800 Android baseline)
+> - Mobile landscape (932×430)
+> - Tablet portrait (820×1180)
+> - Desktop web (1440×900)
+> - Mobile + Desktop responsive (need both viewports planned)
+
+Wait for the answer. The answer becomes the **target viewport** used in Step B element sizing. For responsive web, plan TWO sets of element sizes (mobile and desktop) and pick the largest pixel size each shared asset needs across both.
+
+Only after the user answers do you proceed:
+
+**Step A — Enumerate every screen in the flow.**
+
+Use the inference rules below (game / mobile app / web / SaaS / etc.) to list EVERY screen the project needs, not just the one in the reference. Include overlay screens (level-up, pause, confirmation dialogs), error/empty states, transition screens (loading), and meta screens (settings, bestiary, achievements) implied by the product type.
+
+**Step B — Size every element on every screen.**
+
+For each screen, lay out the actual UI elements with PIXEL DIMENSIONS at the target viewport. State the viewport up front:
+- Mobile portrait game/app: 430 × 932 (iPhone-ish baseline; use 360×800 for Android baseline if specified)
+- Mobile landscape: 932 × 430
+- Tablet portrait: 820 × 1180
+- Web desktop: 1440 × 900 (or 1280 × 720)
+- Web mobile responsive: still plan two viewports — mobile 390×844 and desktop 1440×900
+
+Write the layout as a table per screen:
+
+| Y range | Element | Size | Notes |
+|---|---|---|---|
+| 0–50 | back button (top-left) | 36×36 | iconRound variant |
+| 60–110 | section header label | 240×40 | text-label PNG, no frame |
+| 115–375 | map landscape backdrop | 430×260 | full-bleed, 1.65:1 ratio |
+| ... | ... | ... | ... |
+
+Do this for EVERY screen. Each element is a pixel rectangle on the viewport. Position (x, y, w, h) + display purpose. This step alone takes more thinking than the asset list — and that's the point. Without it, the asset list is guessing.
+
+**Step C — Derive the asset list from the elements.**
+
+Now scan all element tables and ask, per visual element:
+1. Is this a repeating cell in a grid (icons, button states)? → atlas item, with explicit cellW/cellH/grid based on the largest pixel size needed across screens.
+2. Is this a one-off illustration (boss portrait, hero scene, full-screen background)? → single item, sized to the largest screen that displays it.
+3. Is this a runtime composite (button + label, panel + icon, orb + fill)? → split into multiple atlas/single items per the layer-separation rule below.
+4. Is the same visual reused on multiple screens? → ONE asset, sized to the largest use.
+
+Only after Step C do you draft the manifest. The manifest entries' `size` fields MUST trace back to specific pixel measurements from Step B (e.g. "cellW=64 because the stat-icons show at 64×64 in the character card stat row at viewport 430×932").
+
+**Worked example (mobile game):**
+
+```
+Step A — Screens: Title, Character+Stage Select, Loading, In-Game HUD,
+Level-Up Overlay, Pause, Game Over, Victory, Bestiary, Upgrades, Options.
+
+Step B — Element sizing (Character+Stage Select @ 430×932):
+| Y     | Element            | Size    |
+| 0-50  | BACK arrow         | 36×36   |
+| 60-110| header label       | 240×40  |
+| 115-375| map landscape     | 430×260 |
+| (map) | diamond markers ×5 | 50×50 each |
+| ...   | ...                | ...     |
+
+Step C — Derived assets:
+- map-markers atlas: 6 cells (5 location colours + 1 locked), 64×64 each
+  (oversize source for sharp display at 50×50)
+- character cards atlas: 4 hunters full-body, 256×640 cells
+  (source for display at 88×220 with safe headroom)
+- ...
+```
+
+This is the rule: SCREEN PLAN → ELEMENT SIZES → ASSET LIST. Skipping the first two steps produces assets that don't fit the screens they're meant for.
+
 #### CRITICAL: Infer beyond the reference (universal rule — every domain, not just games)
 
 Do NOT limit the plan to what is literally visible in the reference image. Whatever the reference depicts — game, SaaS dashboard, e-commerce page, mobile app, restaurant menu, banking flow — a real shipping product needs many assets that aren't in any single screenshot. **You must explicitly include the contextually-obvious assets that the reference IMPLIES, even when invisible.**
