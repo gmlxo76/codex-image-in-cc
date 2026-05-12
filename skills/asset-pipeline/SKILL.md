@@ -97,15 +97,55 @@ Write the layout as a table per screen:
 
 Do this for EVERY screen. Each element is a pixel rectangle on the viewport. Position (x, y, w, h) + display purpose. This step alone takes more thinking than the asset list — and that's the point. Without it, the asset list is guessing.
 
-**Step C — Derive the asset list from the elements.**
+**Step C — Consolidate: identify shared elements across screens.**
 
-Now scan all element tables and ask, per visual element:
-1. Is this a repeating cell in a grid (icons, button states)? → atlas item, with explicit cellW/cellH/grid based on the largest pixel size needed across screens.
-2. Is this a one-off illustration (boss portrait, hero scene, full-screen background)? → single item, sized to the largest screen that displays it.
-3. Is this a runtime composite (button + label, panel + icon, orb + fill)? → split into multiple atlas/single items per the layer-separation rule below.
-4. Is the same visual reused on multiple screens? → ONE asset, sized to the largest use.
+This is the SINGLE MOST IMPORTANT planning step. Most assets in a real product are SHARED across many screens (back arrow on every sub-screen, primary button on every CTA, modal frame on every dialog, HP icon in HUD and results screen, etc.). If you draft assets per-screen without consolidating, you end up generating the same button 7 times — wasting tokens and creating visual drift.
 
-Only after Step C do you draft the manifest. The manifest entries' `size` fields MUST trace back to specific pixel measurements from Step B (e.g. "cellW=64 because the stat-icons show at 64×64 in the character card stat row at viewport 430×932").
+Procedure:
+1. Take every element from every screen's Step B table.
+2. Group identical/near-identical elements by visual purpose. Examples:
+   - All `back-arrow` instances across screens → ONE shared icon
+   - All `primary-button` instances → ONE shared button atlas (with all states)
+   - All `header-banner` instances → ONE shared banner asset
+   - All `modal-frame` instances → ONE shared frame
+   - All `HP-icon` / `coin-icon` / `gem-icon` instances → ONE shared HUD-icons atlas
+   - All `confirm-dialog` instances → ONE shared dialog frame
+3. For each group, the asset's PIXEL SIZE is the **largest** display size required across consumers (so it stays sharp at all sizes — never upscale, always downscale).
+4. Tag each consolidated asset with `used_by: [screen1, screen2, ...]` in the manifest so the user can see and audit the sharing.
+
+**Examples of consolidation:**
+
+| Per-screen draft (wrong) | Consolidated (right) | Used by |
+|---|---|---|
+| `back-arrow-charselect.png`, `back-arrow-options.png`, `back-arrow-bestiary.png` | ONE `nav-icons` atlas with `back-arrow` cell | charselect, options, bestiary, upgrades, settings |
+| `button-start-hunt.png`, `button-resume.png`, `button-quit.png`, `button-restart.png` | ONE `buttons` atlas (primary / secondary / danger × states), labels rendered separately | every screen with CTAs |
+| `pause-modal-frame.png`, `confirm-quit-frame.png`, `gameover-stats-frame.png` | ONE `modal-frame` 9-slice asset | pause, confirm, gameover, victory results |
+| `hp-icon-hud.png` (32×32), `hp-icon-results.png` (64×64) | ONE `hud-icons` atlas at 64×64 (downscale for HUD) | HUD, results, bestiary detail |
+
+**Step D — Present the consolidated resource list to the user BEFORE drafting the final manifest.**
+
+After consolidation, show the user the proposed shared-asset list, NOT just the raw element list. Use a table like:
+
+| Asset | Kind | Pixel size | Used by | Inferred? |
+|---|---|---|---|---|
+| `nav-icons` | atlas (4×1 of 64×64) | 64×64/cell | charselect / options / bestiary / upgrades | no |
+| `buttons` | atlas (4×5 of 280×280) | 280×280/cell | every screen with CTAs | no |
+| `boss-portraits` | atlas (5×1 of 256×256) | 256×256/cell | boss-intro screen | yes |
+| `gameover-skull` | single | 512×512 | game-over screen | yes |
+| ... | ... | ... | ... | ... |
+
+Use `AskUserQuestion` to confirm. Offer:
+- **Approve as listed** → continue to manifest draft
+- **Add / remove / merge** → take user's free-text edits, regenerate the table, re-ask (up to 3 rounds)
+- **Cancel** → stop
+
+This is the gate. Do NOT proceed to generation without the user reviewing the consolidated list. The user is the only person who knows whether a given grouping is acceptable for their project.
+
+**Step E — Draft the manifest from the approved consolidated list.**
+
+Each manifest entry's `size` field must trace back to specific pixel measurements from Step B (e.g. "cellW=64 because the stat-icons show at 64×64 in the character card stat row at viewport 430×932"). Each entry should carry forward the `used_by` array so future maintainers can see why the asset was sized the way it was.
+
+Only after Step E do you actually invoke style-gen.
 
 **Worked example (mobile game):**
 
