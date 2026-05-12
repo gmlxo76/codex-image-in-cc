@@ -439,6 +439,74 @@ After style-gen returns SAVED, read the result and verify:
 
 If any fail, report and recommend regenerate — bitmap fonts that misalign by even 2-3 pixels look obviously broken in-game.
 
+## Tilemap Conventions (CRITICAL — apply when generating any tilemap/tileset asset)
+
+A tilemap is a 2D grid of cells the engine paints to build a level (graveyard floor, dungeon walls, etc.). The game engine reads the tileset by `(cell_w × cell_h) × index` and stitches tiles edge-to-edge to fill the screen. This imposes hard constraints on how the source asset is authored:
+
+### Rule 1 — Floor tiles and object/decoration sprites are SEPARATE atlases
+
+Floor tiles tile across the entire ground plane (every cell of the visible map). Decorations (tombstones, columns, lanterns, broken statues) sit on top of the floor at specific spots. These two are **fundamentally different rendering passes** and must NOT be packed into one atlas.
+
+| Layer | What it is | Atlas | Cell content |
+|---|---|---|---|
+| Floor / terrain | Continuous ground that fills every map cell | `floor-<biome>.png` | Edge-to-edge tileable texture (no transparent corners) |
+| Objects / decoration | Isolated props placed on specific cells | `objects-<biome>.png` | Standalone sprites with transparent background |
+
+When the prompt asks for a "graveyard tileset", produce TWO files: `floor-graveyard.png` and `objects-graveyard.png`. Don't pack them together — the engine treats them as two different rendering layers and packing them complicates everything (extraction, placement, slicing).
+
+### Rule 2 — Floor tiles are FLAT SQUARE, EDGE-TO-EDGE, NO PADDING
+
+Each floor tile must occupy 100% of its cell. No transparent corners, no diamond shape (that's an isometric pattern, not a top-down tile), no per-tile background gap, no rounded vignette. The tile is a solid opaque RGBA region edge-to-edge in its 128×128 (or 64×64 or whatever) cell.
+
+If even 1px of transparent padding exists around the tile, two adjacent tiles will show a gap in the rendered map. Floor tiles do NOT use safe-margin envelopes — the safe-margin guidance for atlas containment exists for ICONS/BUTTONS, NOT for floor tiles.
+
+### Rule 3 — Floor tiles must be SEAMLESSLY TILEABLE
+
+When two of the same floor tile sit next to each other in the rendered map, the seam must be invisible. That means:
+
+- The **right edge column** of pixels must visually flow into the **left edge column** of the same tile (and vice versa).
+- The **top edge row** must flow into the **bottom edge row**.
+- Patterns near edges do NOT terminate with a hard border — pebbles, cracks, grass blades, mortar lines run continuously across the seam.
+- Different variants (e.g. dirt vs cobblestone) don't have to seam-match each other; they only need to seam-match COPIES OF THEMSELVES.
+
+Organic, noisy textures (dirt, grass, sand, snow, stone) tile much better than geometric/structured patterns. Avoid centerpieces (a single rune in the middle of a tile) — placing the same tile 4×4 immediately makes the rune repeat visibly. If you need a focal element, put it on a DECORATION sprite, not on a floor tile.
+
+### Rule 4 — TOP-DOWN view only, NO isometric/3D perspective
+
+For top-down 2D games (Vampire Survivors, Hades, Diablo-like camera), floor tiles must be rendered as if looking STRAIGHT DOWN. No tilted/3D edges, no isometric diamond shape, no drop shadow under the tile. Otherwise tiles look like floating tilted props instead of seamless ground.
+
+### Required prompt clauses for floor-tile generation (auto-injected by the agent)
+
+When a manifest item is a `floor` tileset (or generic `tileset` kind without explicit "object" label), the style-gen prompt MUST include:
+
+```
+FLOOR TILESET RULES — every tile in this sheet:
+
+1. FLAT SQUARE, EDGE-TO-EDGE. Each cell is fully painted from pixel 0 to
+   pixel cellW-1 horizontally and 0 to cellH-1 vertically. NO transparent
+   corners, NO diamond/hexagonal shape, NO per-tile background gap.
+
+2. TOP-DOWN view. Looking straight down at the ground. NO isometric
+   perspective, NO tilted edges, NO drop shadow under the tile.
+
+3. SEAMLESSLY TILEABLE. The right edge column matches the left edge column;
+   the top edge row matches the bottom edge row. Two copies of the same
+   tile placed adjacent show NO visible seam. Patterns flow across the
+   edges continuously — do NOT terminate with a border, do NOT add a
+   vignette near the edges.
+
+4. NO centerpiece focal elements. The texture should look natural when
+   repeated in a 4x4 or larger grid without visible repetition artifacts.
+   Focal decorations belong on the OBJECTS atlas, not the floor tileset.
+
+5. UNIFORM PALETTE across all variants. Variation is in material
+   (dirt/cobble/grass/stone), not in art style or lighting direction.
+```
+
+### Decoration/object tilesets
+
+Object atlases (gravestones, columns, lanterns, etc.) DO use the standard atlas containment rules (safe margin, centered anchor, transparent background between cells). They are NOT seamless. Standard atlas pipeline applies — the floor rules above only apply to TERRAIN/FLOOR sheets.
+
 ## Transparent-Output Pipeline (CRITICAL — auto-applied for every transparent item)
 
 Codex CLI's built-in `imagegen` skill produces transparency by generating on a chroma-key background and then locally running `remove_chroma_key.py` to convert that key color to alpha. By default Codex picks its own chroma color (often green `#03f904`) and frequently chains an additional "atlas containment enforcement" post-processing pass that ZEROES PIXELS within the cell margin envelope — this is destructive and silently clips decoration tips (corner spikes, glow halos, ornament fringes) the prompt asked for.
