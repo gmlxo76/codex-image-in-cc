@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-12 — atlas strict containment + slice command
+
+### Added
+
+- **`/codex-image:slice <input.png> <output-dir> <grid spec>`** — new user-invoked slash command. Slices a uniform-grid atlas sheet into per-cell PNGs with tight non-transparent bounds, plus an `atlas.json` sidecar containing each cell's origin, tight rect, offset within cell, and size. Backend: `scripts/slice.py` (Python 3 + Pillow). Naming: cells default to `r<row>c<col>`, or you can pass an explicit name list.
+- **`verify-atlas` dispatcher subcommand** — checks a sheet's cell-internal content respects a safe-margin envelope; reports per-cell violations as JSON. Exits 0 if clean, 1 if any cell bleeds across the margin. Used by asset-pipeline to validate atlas generation.
+- **Atlas Strict Containment Conventions** in `skills/asset-pipeline/SKILL.md` — for any item with an `atlas: { cols, rows, cellW, cellH, safe_margin, cells }` field in the manifest, the agent auto-injects strict grid + safe-margin + uniform-anchor + transparent-background + uniform-style clauses into the style-gen prompt. After generation, the agent runs verify-atlas and regenerates up to 3 times if cells bleed past the safe margin. The user never types these rules; the SKILL.md enforces them based on manifest metadata.
+- **`skills/slice/SKILL.md`** — user-facing slash command definition that parses natural-language grid spec ("4x5 grid", optional cell-name list, optional safe margin) and dispatches to the slice subcommand.
+
+### Why
+
+AI image generators do not respect strict grid boundaries by default. Buttons, ornaments, and glows leak across cell boundaries; when sliced by uniform grid, content gets clipped. The previous SKILL.md rules (uniform cell, consistent anchor) were necessary but not sufficient — the agent needed an explicit, measurable safe-margin envelope plus an automated verification + regeneration loop. The new `atlas` manifest field carries that metadata, the SKILL.md applies it automatically, and the new verify/slice tooling closes the loop.
+
+### Notes
+
+- Slicing is intentionally **user-invoked**, not auto-run by asset-pipeline. The agent surfaces the slice command after each atlas generation but lets the user decide when to extract. This keeps sheet inspection in the user's hands and avoids polluting output directories for sheets used as animation atlases.
+- Backend requires Python 3 + Pillow. The dispatcher prints install instructions if Python isn't found.
+
 ## [0.3.3] - 2026-05-11 — layer separation + 9-slice rules
 
 ### Added to `skills/asset-pipeline/SKILL.md`

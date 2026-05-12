@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 
 const MIN_NODE_VERSION = "18.18.0";
 const MIN_CODEX_VERSION = "0.124.0";
@@ -386,6 +386,36 @@ async function handleStyleGen(argv) {
   }
 }
 
+function handleSlice(argv) {
+  return runPythonSlice(argv, /* verifyOnly */ false);
+}
+
+function handleVerifyAtlas(argv) {
+  // Force --verify; user shouldn't have to pass it.
+  return runPythonSlice([...argv, "--verify"], /* verifyOnly */ true);
+}
+
+function runPythonSlice(argv, verifyOnly) {
+  const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "slice.py");
+  const py = process.platform === "win32" ? "python" : "python3";
+  const result = spawnSync(py, [scriptPath, ...argv], {
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  if (result.error && result.error.code === "ENOENT") {
+    console.error(
+      `${verifyOnly ? "verify-atlas" : "slice"}: Python interpreter not found.\n` +
+      "Install Python 3 and Pillow:\n" +
+      "  Windows: https://www.python.org/downloads/  then `pip install Pillow`\n" +
+      "  macOS:   `brew install python3` then `pip3 install Pillow`\n" +
+      "  Linux:   `apt install python3 python3-pip` then `pip3 install Pillow`"
+    );
+    process.exitCode = 2;
+    return;
+  }
+  process.exitCode = result.status ?? 0;
+}
+
 function handleStatus(argv) {
   const options = parseStatusOptions(argv);
   if (options.help) {
@@ -413,13 +443,18 @@ function usage() {
     "  edit <input-path> <edit instructions>               Dispatch an edit request to Codex's imagegen skill (codex exec --image)",
     "  style-gen <reference-path> <generate instructions>  Generate a new image whose visual style matches an attached reference",
     "  parse-args <reference-path> <context>               Validate asset-pipeline arguments (prints REF/CONTEXT lines)",
+    "  slice <input.png> --output-dir <dir> --grid CxR [--names ...] [--safe-margin N]",
+    "                                                      Slice atlas sheet into per-cell PNGs + atlas.json (uses Python+Pillow)",
+    "  verify-atlas <input.png> --grid CxR --safe-margin N [--cell-w N --cell-h N]",
+    "                                                      Verify atlas sheet contents respect safe margin; reports violations",
     "",
     "Each command is also exposed as a Claude Code plugin skill:",
     "  /codex-image:status",
     "  /codex-image:generate <...>",
     "  /codex-image:edit <input-path> <...>",
     "  /codex-image:style-gen <reference-path> <...>",
-    "  /codex-image:asset-pipeline <reference-path> <project context>   (orchestrates style-gen for a planned asset batch)"
+    "  /codex-image:asset-pipeline <reference-path> <project context>   (orchestrates style-gen for a planned asset batch)",
+    "  /codex-image:slice <input.png> <output-dir> <grid spec>          (slice atlas sheet into per-cell PNGs)"
   ].join("\n");
 }
 
@@ -454,6 +489,16 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === "parse-args") {
     handleParseArgs(rest);
+    return;
+  }
+
+  if (command === "slice") {
+    handleSlice(rest);
+    return;
+  }
+
+  if (command === "verify-atlas") {
+    handleVerifyAtlas(rest);
     return;
   }
 

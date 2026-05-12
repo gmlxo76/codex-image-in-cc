@@ -439,6 +439,104 @@ After style-gen returns SAVED, read the result and verify:
 
 If any fail, report and recommend regenerate — bitmap fonts that misalign by even 2-3 pixels look obviously broken in-game.
 
+## Atlas Strict Containment Conventions (CRITICAL — auto-applied for all atlas/sheet items)
+
+This block is the single most important rule for sheet-style assets. AI image generators DO NOT respect grid boundaries by default. Buttons leak across cells, headers extend into neighbouring rows, icons drift to edges. When the resulting sheet is later sliced by uniform grid, content gets clipped at cell boundaries.
+
+**For every item that is a uniform-grid atlas (sprite-sheet, button-atlas, icon-set, font-sheet, card-states, etc.), the style-gen prompt MUST include these constraints — the user never types them; the agent auto-injects them based on the item's `atlas` metadata in the manifest.**
+
+### Required prompt clauses (auto-injected)
+
+For any item where the manifest declares `atlas: { cols, rows, cellW, cellH, safe_margin }`, the agent MUST append the following to the style-gen prompt before invoking the dispatcher:
+
+```
+STRICT ATLAS CONTAINMENT — these rules override any default layout latitude:
+
+1. Grid: EXACTLY {cols} columns by {rows} rows on the canvas. Each cell is
+   EXACTLY {cellW} x {cellH} pixels. The total canvas dimensions equal
+   {cols * cellW} x {rows * cellH}.
+
+2. SAFE MARGIN: every visible pixel of cell content MUST stay strictly INSIDE
+   the inner rectangle defined by margin {safe_margin} pixels in from each
+   cell edge. That is, for each cell at (col*cellW, row*cellH), all non-
+   transparent pixels must lie within
+       ( col*cellW + {safe_margin}, row*cellH + {safe_margin} )
+       to
+       ( (col+1)*cellW - {safe_margin}, (row+1)*cellH - {safe_margin} ).
+   NO decoration, ornament, glow, or shadow may cross the cell boundary or
+   bleed into neighbouring cells. The {safe_margin}-pixel inset on all sides
+   is non-negotiable.
+
+3. UNIFORM ANCHOR: every cell's content is anchored at the same position
+   within the cell (typically centered, or bottom-center for ground sprites).
+   Same position. Same scale. Same baseline. No drift.
+
+4. TRANSPARENT BACKGROUND between cells and outside content. No painted
+   backgrounds, no shared borders, no full-canvas color washes.
+
+5. UNIFORM STYLE: same line weight, same palette, same lighting direction
+   across every cell. Variation is only in subject (e.g., different weapon
+   icons) or state (e.g., normal/hover/pressed for buttons), never in art
+   style.
+```
+
+The agent substitutes `{cols}`, `{rows}`, `{cellW}`, `{cellH}`, `{safe_margin}` from the manifest item's `atlas` field. If `safe_margin` is not specified, default to **max(8, min(cellW, cellH) // 16)** pixels — roughly 6% of the smaller cell dimension.
+
+### Mandatory verification after each atlas generation
+
+Immediately after the style-gen call for an atlas item finishes (the SAVED line appears), the agent MUST run the verify-atlas dispatcher to confirm no cell content crosses the safe-margin envelope:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-image.mjs" verify-atlas "<saved-path>" --grid <cols>x<rows> --cell-w <cellW> --cell-h <cellH> --safe-margin <safe_margin>
+```
+
+The verifier exits 0 if clean, 1 if violations. Capture the JSON report. If `passed: false`:
+
+1. Inspect the `violations` list for which cells bled and which sides (left/top/right/bottom overflow).
+2. Append a stricter clause to the style-gen prompt — for each violated side, e.g. "INCREASE inner padding from the cell's top edge by another 16 pixels — current generation has cell {name} content starting at the cell's top edge with NO padding, which is forbidden".
+3. Regenerate. Repeat up to 3 attempts. If still failing after 3 attempts, mark the item as `failed_with_violations` in the manifest results, surface the issue to the user, and continue with the rest of the batch — do NOT silently accept a broken sheet.
+
+### Manifest schema extension for atlas items
+
+When the agent plans the asset list (step 2 above), atlas items in the manifest take this shape:
+
+```json
+{
+  "name": "ui-buttons",
+  "category": "ui",
+  "subject": "Menu button atlas — 5 button styles × 4 states each",
+  "output_path": "mvp_2/ui/buttons.png",
+  "size": "1024x1024",
+  "transparent": true,
+  "atlas": {
+    "cols": 4,
+    "rows": 5,
+    "cellW": 256,
+    "cellH": 204,
+    "safe_margin": 12,
+    "cells": [
+      "primaryNormal", "primaryHover", "primaryPressed", "primaryLocked",
+      "secondaryNormal", "secondaryHover", "secondaryPressed", "secondaryLocked",
+      "smallNormal", "smallHover", "smallPressed", "smallLocked",
+      "wideNormal", "wideHover", "widePressed", "wideLocked",
+      "iconNormal", "iconHover", "iconPressed", "iconLocked"
+    ]
+  }
+}
+```
+
+The `cells` array must contain exactly `cols * rows` names in row-major order (row 0 col 0 first, then row 0 col 1, ..., row N col M last). These names are passed to the slice command later when the user wants per-cell PNGs.
+
+### Slicing is user-invoked, not automatic
+
+The asset-pipeline does NOT auto-slice. After generation + verification, surface to the user:
+
+> Sheet saved at `<output_path>`. To extract per-cell PNGs, run:
+>
+>     /codex-image:slice <output_path> <output_dir>/<name>_sliced "<cols>x<rows> grid, names <comma-separated>"
+
+This keeps slicing under user control — they may want to inspect the sheet first or skip slicing entirely for sheets used as animation atlases (where the engine slices at runtime).
+
 ## Constraints
 
 - Sequential only — never run multiple style-gen calls in parallel from one asset-pipeline invocation.
@@ -446,6 +544,7 @@ If any fail, report and recommend regenerate — bitmap fonts that misalign by e
 - Always save the manifest **before** running execution — if the session is interrupted, the user can resume from the manifest manually.
 - Never modify the reference image. Never save the reference as an output artifact.
 - **For sprite sheet items: always include the Sprite Sheet Conventions above in the style-gen prompt, and run the verification step after generation.**
+- **For ANY atlas item (item with `atlas` field in manifest): always inject the Atlas Strict Containment clauses above into the style-gen prompt, run verify-atlas after generation, and regenerate up to 3 times if violations are found.**
 
 ## Cost note
 
