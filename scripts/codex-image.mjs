@@ -387,7 +387,103 @@ async function handleStyleGen(argv) {
 }
 
 function handleSlice(argv) {
-  return runPythonSlice(argv, /* verifyOnly */ false);
+  // Manifest mode: --manifest <path> [--output-dir <dir>] [--only <name,name,...>]
+  //   Reads the manifest, iterates items with kind == "atlas", and slices each
+  //   using its grid/cells fields. Output written to <output-dir>/<atlas-name>/
+  //   (defaults to manifest-dir/<atlas-name>_sliced/).
+  const manifestIdx = argv.findIndex((a) => a === "--manifest" || a.startsWith("--manifest="));
+  if (manifestIdx === -1) {
+    return runPythonSlice(argv, /* verifyOnly */ false);
+  }
+  return runManifestSlice(argv);
+}
+
+function runManifestSlice(argv) {
+  // Parse flags.
+  let manifestPath = null;
+  let baseOutDir = null;
+  let onlyFilter = null;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--manifest") { manifestPath = argv[++i]; continue; }
+    if (a.startsWith("--manifest=")) { manifestPath = a.slice("--manifest=".length); continue; }
+    if (a === "--output-dir") { baseOutDir = argv[++i]; continue; }
+    if (a.startsWith("--output-dir=")) { baseOutDir = a.slice("--output-dir=".length); continue; }
+    if (a === "--only") { onlyFilter = argv[++i].split(",").map((s) => s.trim()).filter(Boolean); continue; }
+    if (a.startsWith("--only=")) { onlyFilter = a.slice("--only=".length).split(",").map((s) => s.trim()).filter(Boolean); continue; }
+  }
+  if (!manifestPath || !fs.existsSync(manifestPath)) {
+    console.error(`slice --manifest: manifest file not found: ${manifestPath}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  } catch (err) {
+    console.error(`slice --manifest: failed to parse manifest JSON: ${err.message}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const manifestDir = path.dirname(path.resolve(manifestPath));
+  const items = Array.isArray(manifest.items) ? manifest.items : [];
+  const atlasItems = items.filter((it) => it && it.kind === "atlas");
+  const filtered = onlyFilter ? atlasItems.filter((it) => onlyFilter.includes(it.name)) : atlasItems;
+
+  if (filtered.length === 0) {
+    console.error(
+      `slice --manifest: no atlas items to slice` +
+      (onlyFilter ? ` (filter --only=${onlyFilter.join(",")})` : "")
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const results = [];
+  for (const item of filtered) {
+    if (!item.path || !item.grid || !Array.isArray(item.cells)) {
+      console.error(`slice --manifest: skipping ${item.name}: missing path/grid/cells`);
+      results.push({ name: item.name, status: "skipped", reason: "missing-fields" });
+      continue;
+    }
+    const inputPath = path.resolve(manifestDir, item.path);
+    const outDir = baseOutDir
+      ? path.resolve(baseOutDir, item.name)
+      : path.join(manifestDir, `${item.name}_sliced`);
+    const { cols, rows, cellW, cellH } = item.grid;
+    const namesCsv = item.cells.join(",");
+    const safeMargin = item.safe_margin ?? 8;
+
+    console.error(`\n--- slicing ${item.name} (${cols}x${rows}) -> ${outDir} ---`);
+    const sliceArgs = [
+      inputPath,
+      "--output-dir", outDir,
+      "--grid", `${cols}x${rows}`,
+      "--names", namesCsv,
+      "--safe-margin", String(safeMargin),
+    ];
+    if (cellW != null) sliceArgs.push("--cell-w", String(cellW));
+    if (cellH != null) sliceArgs.push("--cell-h", String(cellH));
+    runPythonSlice(sliceArgs, /* verifyOnly */ false);
+    results.push({
+      name: item.name,
+      status: process.exitCode === 0 ? "ok" : "failed",
+      output_dir: outDir,
+      cells: item.cells.length,
+    });
+    // Reset exit code so subsequent items still run; we summarize at the end.
+    if (process.exitCode !== 0) process.exitCode = 0;
+  }
+
+  const failed = results.filter((r) => r.status === "failed").length;
+  console.error(`\n=== slice --manifest summary ===`);
+  for (const r of results) {
+    console.error(`  ${r.status.padEnd(7)} ${r.name}  ${r.output_dir ?? ""}`);
+  }
+  console.error(`Total: ${results.length}  ok: ${results.length - failed}  failed: ${failed}`);
+  process.exitCode = failed > 0 ? 1 : 0;
 }
 
 function handleVerifyAtlas(argv) {
@@ -444,7 +540,10 @@ function usage() {
     "  style-gen <reference-path> <generate instructions>  Generate a new image whose visual style matches an attached reference",
     "  parse-args <reference-path> <context>               Validate asset-pipeline arguments (prints REF/CONTEXT lines)",
     "  slice <input.png> --output-dir <dir> --grid CxR [--names ...] [--safe-margin N]",
-    "                                                      Slice atlas sheet into per-cell PNGs + atlas.json (uses Python+Pillow)",
+    "                                                      Slice ONE atlas sheet into per-cell PNGs + atlas.json (uses Python+Pillow)",
+    "  slice --manifest <manifest.json> [--output-dir <base-dir>] [--only name1,name2,...]",
+    "                                                      Slice ALL atlas-kind items from a manifest. Reads each item's grid+cells+safe_margin",
+    "                                                      and writes per-atlas output dirs (one PNG per cell + atlas.json sidecar each).",
     "  verify-atlas <input.png> --grid CxR --safe-margin N [--cell-w N --cell-h N]",
     "                                                      Verify atlas sheet contents respect safe margin; reports violations",
     "",

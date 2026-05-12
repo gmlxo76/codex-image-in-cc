@@ -439,6 +439,59 @@ After style-gen returns SAVED, read the result and verify:
 
 If any fail, report and recommend regenerate — bitmap fonts that misalign by even 2-3 pixels look obviously broken in-game.
 
+## Transparent-Output Pipeline (CRITICAL — auto-applied for every transparent item)
+
+Codex CLI's built-in `imagegen` skill produces transparency by generating on a chroma-key background and then locally running `remove_chroma_key.py` to convert that key color to alpha. By default Codex picks its own chroma color (often green `#03f904`) and frequently chains an additional "atlas containment enforcement" post-processing pass that ZEROES PIXELS within the cell margin envelope — this is destructive and silently clips decoration tips (corner spikes, glow halos, ornament fringes) the prompt asked for.
+
+**The agent MUST control the transparent pipeline by adding the following clauses to every transparent-output style-gen prompt, before invoking the dispatcher:**
+
+```
+TRANSPARENT OUTPUT PIPELINE — these rules override any default behaviour:
+
+1. CHROMA KEY: use MAGENTA #FF00FF as the chroma-key background colour for the
+   generated raw image. Do not use green, blue, or any other key colour. Pure
+   magenta (255, 0, 255) is the only allowed key. This colour never appears in
+   the requested art and is unambiguous to extract.
+
+2. ALPHA EXTRACTION: after generation, run the local helper
+   `$CODEX_HOME/skills/.system/imagegen/scripts/remove_chroma_key.py` to convert
+   the magenta key to alpha. Pass `--auto-key border` or explicit `--key #FF00FF`
+   so the script removes magenta and only magenta. Standard despill is allowed.
+
+3. ALLOWED after alpha extraction: resize the canvas with LANCZOS resampling
+   to exactly match the requested output dimensions. LANCZOS preserves the
+   geometric relationship between content and grid cells — a button that fit
+   inside its cell at the generated size will still fit at the resized size.
+
+4. FORBIDDEN after alpha extraction: any per-pixel ALPHA-CLEARING pass that
+   loops through cells and zeroes pixels within a margin envelope. This is
+   the specific destructive step that has been observed clipping decoration
+   tips (spike corners, glow halos, ornament fringes) the prompt deliberately
+   placed inside the safe-margin guidance. The safe-margin instruction is a
+   GUIDE for generation, NOT a license for post-hoc pixel destruction.
+
+   Also forbidden: hard-cropping anything beyond a few border pixels for
+   grid alignment (e.g., trimming 2px right + 2px bottom to make an even
+   grid divisor is fine; cropping anything that contains content is not).
+
+5. After resize + alignment crop, the result IS the final asset. Save directly
+   at the requested output path. Containment compliance is then audited by
+   verify-atlas; if violations are found, the agent regenerates with stricter
+   PROMPT-level instructions (smaller decoration, more padding), never by
+   running an alpha-clearing pass.
+```
+
+The agent injects these 5 clauses INTO EVERY style-gen prompt whose item has `transparent: true` (which is most UI/sprite/icon items). This goes alongside the Atlas Strict Containment clauses (next section) — both are required for atlas items, the transparent clauses alone for non-atlas transparent items.
+
+### Why this matters
+
+Without the explicit magenta key + stop-at-step-2 instruction, Codex defaults to its own pipeline which has been observed to:
+- pick green `#03f904` as the chroma key (works but inconsistent across runs)
+- run a follow-up "atlas containment enforcement" script that LOOPS THROUGH every cell and clears all pixels in a 20-pixel inset zone — this PERMANENTLY DELETES decoration that the prompt explicitly requested and that the safe-margin instruction was supposed to merely guide, not enforce destructively
+- silently rescale and pad the canvas, drifting from the requested output dimensions
+
+By locking the chroma key to magenta and forbidding the destructive enforcement pass, we get: raw generation → alpha-extracted PNG → done. The asset preserves all the intentional decoration. Containment is then audited separately (via verify-atlas), and if the output bleeds across cells the agent regenerates with stricter prompt-level instructions — never by overwriting pixels.
+
 ## Atlas Strict Containment Conventions (CRITICAL — auto-applied for all atlas/sheet items)
 
 This block is the single most important rule for sheet-style assets. AI image generators DO NOT respect grid boundaries by default. Buttons leak across cells, headers extend into neighbouring rows, icons drift to edges. When the resulting sheet is later sliced by uniform grid, content gets clipped at cell boundaries.

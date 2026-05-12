@@ -10,7 +10,9 @@ Divides an atlas sheet (uniform grid of UI/icon/button/font cells) into individu
 
 ## Arguments
 
-User invokes:
+Two modes:
+
+### A) Single-sheet mode
 
 ```
 /codex-image:slice <input.png> <output-dir> <grid spec>
@@ -24,6 +26,20 @@ User invokes:
 - `"4x5 grid, safe margin 8"` → cols=4, rows=5, --safe-margin 8
 
 Quote the input path if it contains spaces.
+
+### B) Manifest mode (slice many atlases at once)
+
+```
+/codex-image:slice --manifest <manifest.json> [--output-dir <base-dir>] [--only name1,name2,...]
+```
+
+Reads the manifest, finds every item whose `kind` is `"atlas"`, and slices each one using its declared `grid` (cols/rows/cellW/cellH), `cells` (named cell array in row-major order), and `safe_margin`. Each atlas writes its own output directory.
+
+- `--manifest <path>`: required, points at a manifest.json with an `items[]` array.
+- `--output-dir <base-dir>` (optional): write `<base-dir>/<atlas-name>/` per atlas. Default: `<manifest-dir>/<atlas-name>_sliced/`.
+- `--only name1,name2,...` (optional): only slice atlases whose `name` matches the comma list. Without this flag, every atlas-kind item is sliced.
+
+Items with any kind other than `"atlas"` (sprite-sheet / font-sheet / tileset / vfx-sheet / fill-textures / single) are **skipped** — they are intended to be read by the engine at runtime, not split into per-cell files.
 
 ## Workflow (agent executes)
 
@@ -66,16 +82,29 @@ If `violations == 0`, output is clean and engine-ready.
 ```
 <output-dir>/
 ├── atlas.json           # full metadata: source, sheet_size, grid, per-cell coords
-├── <cell-name-1>.png    # tight-cropped, transparent-edge PNG
+├── <cell-name-1>.png    # cellW x cellH PNG (transparent padding preserved)
 ├── <cell-name-2>.png
 └── ...
 ```
 
-Each cell PNG is cropped to its tight non-transparent bounds (smaller than the cell). The atlas.json records `offset_in_cell` and `cell_origin` so the engine can re-align the cell to its original anchor if needed.
+**Default: each cell PNG is uniform per atlas, with content auto-centered.** The slicer:
+
+1. Detects the non-transparent content bbox of the whole sheet (handles asymmetric canvas padding produced by AI generators).
+2. Divides that content area into `cols × rows` integer-pitch cells, centering any remainder.
+3. For each cell, detects the cell's own content tight-bbox and pastes it centered onto a transparent cell-sized canvas.
+
+The result: every output PNG for the same atlas has identical dimensions AND the icon/element inside is centered, regardless of positional drift in the source (e.g. AI generated atlas where skull is top-left in cell A and hourglass is top-right in cell B).
+
+Flags to override:
+- `--tight-crop` — output PNGs cropped to their non-transparent bbox (variable dimensions per cell). Disables uniform-size + recentering.
+- `--no-recenter` — keep cell content at its raw position; do not paste-center. Use when positional layout within the cell matters (e.g. multi-state button atlases where each state is in the same spot).
+- `--no-auto-bbox` — divide the raw canvas instead of the content bbox. Use when the source atlas was authored edge-to-edge with no overall canvas padding.
+
+`atlas.json` records `tight_rect` / `tight_size` / `offset_in_cell` per cell either way, so an engine can locate the inner content if needed.
 
 ## Behavior notes
 
 - The dispatcher is non-interactive — no prompts. All errors print to stderr.
 - Cell name defaults to `r<row>c<col>` if `--names` not provided.
-- `--safe-margin` only affects the violations report; it does not change cropping (cropping is always tight to non-transparent pixels).
+- `--safe-margin` only affects the violations report; it does not change cropping.
 - Cells with no non-transparent content are skipped (reported as `empty: N`).

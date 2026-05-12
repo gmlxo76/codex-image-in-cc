@@ -1,9 +1,13 @@
 """Slice an atlas-style sheet into individual cell PNGs.
 
 Reads an input PNG, divides into a cols x rows uniform grid, and for each cell
-finds the tight non-transparent bounding box, then crops + saves each cell as
-its own PNG. Also writes an `atlas.json` sidecar with per-cell metadata
-(cell origin, tight rect, offset within cell, size) for engine positioning.
+crops + saves each cell as its own PNG at the FULL CELL DIMENSIONS (transparent
+padding preserved). Also writes an `atlas.json` sidecar with per-cell metadata.
+
+By default every sliced PNG is the same size (cellW x cellH), regardless of how
+much non-transparent content sits inside the cell. Pass `--tight-crop` to use
+the legacy tight-bbox behaviour (each PNG cropped to its non-transparent bounds,
+producing variable per-cell dimensions).
 
 Can also operate in `verify` mode (no output) — slices and checks whether any
 cell's tight content bleeds outside the safe-margin envelope, reporting
@@ -20,9 +24,12 @@ Options:
     --names "n1,n2,..."     Comma-separated cell names in row-major order. If
                             omitted, cells named "r0c0", "r0c1", ...
     --safe-margin N         Margin (px) inside each cell that content must respect.
-                            Default 0 (no margin enforcement; just tight crop).
+                            Default 0 (no margin enforcement).
                             With --verify, violations are flagged when content
                             crosses the safe-margin envelope.
+    --tight-crop            Crop each cell to its non-transparent bbox instead of
+                            the full cell rect. Outputs variable-sized PNGs.
+                            Default: every cell PNG is exactly cellW x cellH.
     --output-dir <dir>      Output directory for sliced cells + atlas.json.
                             Required unless --verify.
     --verify                Verify-only mode: no output files, report violations
@@ -99,6 +106,33 @@ def main(argv: list[str]) -> int:
     p.add_argument("--output-dir", default=None, help="Output dir for cells + atlas.json")
     p.add_argument("--verify", action="store_true", help="Verify mode only — no output")
     p.add_argument("--alpha-threshold", type=int, default=20, help="Alpha threshold (0-255)")
+    p.add_argument(
+        "--tight-crop",
+        action="store_true",
+        help="Crop each cell to its non-transparent bbox instead of full cell rect.",
+    )
+    p.add_argument(
+        "--no-auto-bbox",
+        action="store_true",
+        help=(
+            "Disable content-bbox auto-detection. By default the slicer computes "
+            "the alpha bbox of the whole sheet and divides THAT area into cols x rows "
+            "cells (so asymmetric canvas padding doesn't shift cell boundaries away "
+            "from where the content actually sits). Disable to use the raw canvas "
+            "and divide sheetW/cols x sheetH/rows from (0, 0)."
+        ),
+    )
+    p.add_argument(
+        "--no-recenter",
+        action="store_true",
+        help=(
+            "Disable per-cell content recentering. By default each cell's "
+            "non-transparent content is detected and pasted CENTERED in the output "
+            "PNG, so AI-generated atlases with positional drift (icons placed "
+            "top-left in one cell, bottom-right in another) become visually "
+            "aligned. Disable to keep content at its raw position within the cell."
+        ),
+    )
 
     args = p.parse_args(argv)
 
@@ -116,22 +150,49 @@ def main(argv: list[str]) -> int:
     img = Image.open(input_path).convert("RGBA")
     sheet_w, sheet_h = img.size
 
-    cell_w = args.cell_w if args.cell_w is not None else sheet_w // cols
-    cell_h = args.cell_h if args.cell_h is not None else sheet_h // rows
+    # Content-bbox auto-detection (default on). AI-generated atlases routinely
+    # have asymmetric padding around the entire content area (e.g. 33px left,
+    # 17px top, 28px right, 39px bottom). Dividing the canvas by cols×rows
+    # then slices through content; dividing the content bbox instead lines
+    # cells up with where the art actually sits.
+    if args.no_auto_bbox:
+        content_x0, content_y0 = 0, 0
+        content_w_raw, content_h_raw = sheet_w, sheet_h
+    else:
+        alpha_mask = img.split()[3].point(
+            lambda v: 255 if v > args.alpha_threshold else 0
+        )
+        bbox = alpha_mask.getbbox()
+        if bbox is None:
+            print("ERROR: sheet is entirely transparent.", file=sys.stderr)
+            return 2
+        content_x0, content_y0, content_x1, content_y1 = bbox
+        content_w_raw = content_x1 - content_x0
+        content_h_raw = content_y1 - content_y0
 
-    expected_w = cols * cell_w
-    expected_h = rows * cell_h
-    if expected_w != sheet_w or expected_h != sheet_h:
-        # Allow off-by-one rounding when --cell-w / --cell-h not explicit
-        diff_w = abs(expected_w - sheet_w)
-        diff_h = abs(expected_h - sheet_h)
-        if diff_w > 2 or diff_h > 2:
-            print(
-                f"WARNING: grid {cols}x{rows} * cell {cell_w}x{cell_h} = "
-                f"{expected_w}x{expected_h} but sheet is {sheet_w}x{sheet_h} "
-                f"(diff {diff_w},{diff_h}px). Using grid as authoritative.",
-                file=sys.stderr,
-            )
+    if args.cell_w is not None:
+        cell_w = args.cell_w
+    else:
+        cell_w = content_w_raw // cols
+    if args.cell_h is not None:
+        cell_h = args.cell_h
+    else:
+        cell_h = content_h_raw // rows
+
+    # Fractional remainder distributed across cells by using float pitch for boundaries.
+    pitch_w = content_w_raw / cols
+    pitch_h = content_h_raw / rows
+
+    if not args.no_auto_bbox and (content_x0 > 0 or content_y0 > 0 or
+                                   content_x0 + content_w_raw < sheet_w or
+                                   content_y0 + content_h_raw < sheet_h):
+        print(
+            f"INFO: auto-bbox detected content area "
+            f"({content_x0},{content_y0})-({content_x0+content_w_raw},{content_y0+content_h_raw}) "
+            f"in {sheet_w}x{sheet_h} canvas; "
+            f"slicing within bbox. Output cell size: {cell_w}x{cell_h}",
+            file=sys.stderr,
+        )
 
     name_list: Optional[list[str]] = None
     if args.names:
@@ -165,14 +226,24 @@ def main(argv: list[str]) -> int:
     sliced = 0
     empty = 0
 
+    # Integer pitch so every cell in this atlas has IDENTICAL output dimensions.
+    # The remainder (content_w_raw - cols*int_pitch_w) is centered as padding
+    # before the first cell, so cells stay centered on the content area.
+    int_pitch_w = content_w_raw // cols
+    int_pitch_h = content_h_raw // rows
+    pad_x = (content_w_raw - cols * int_pitch_w) // 2
+    pad_y = (content_h_raw - rows * int_pitch_h) // 2
+    origin_x = content_x0 + pad_x
+    origin_y = content_y0 + pad_y
+
     for row in range(rows):
         for col in range(cols):
             idx = row * cols + col
             name = name_list[idx] if name_list else f"r{row}c{col}"
-            x0 = col * cell_w
-            y0 = row * cell_h
-            x1 = x0 + cell_w
-            y1 = y0 + cell_h
+            x0 = origin_x + col * int_pitch_w
+            y0 = origin_y + row * int_pitch_h
+            x1 = x0 + int_pitch_w
+            y1 = y0 + int_pitch_h
 
             tight = tight_bbox_in_cell(img, x0, y0, x1, y1, args.alpha_threshold)
             if tight is None:
@@ -208,7 +279,23 @@ def main(argv: list[str]) -> int:
                     })
 
             if not args.verify and out_dir is not None:
-                cropped = img.crop(tight)
+                if args.tight_crop:
+                    cropped = img.crop(tight)
+                elif args.no_recenter:
+                    # Crop at full cell rect; content stays at its raw position.
+                    cropped = img.crop((x0, y0, x1, y1))
+                else:
+                    # Default: crop tight content, then paste centered into a
+                    # transparent cell-sized canvas. Fixes AI-generated atlases
+                    # where each cell's icon drifts to a different anchor.
+                    out_w = int_pitch_w
+                    out_h = int_pitch_h
+                    cropped = Image.new("RGBA", (out_w, out_h), (0, 0, 0, 0))
+                    inner = img.crop(tight)
+                    iw, ih = inner.size
+                    paste_x = (out_w - iw) // 2
+                    paste_y = (out_h - ih) // 2
+                    cropped.paste(inner, (paste_x, paste_y), inner)
                 out_path = out_dir / f"{name}.png"
                 cropped.save(out_path, optimize=True)
 
@@ -219,8 +306,9 @@ def main(argv: list[str]) -> int:
                 "cell_origin": [x0, y0],
                 "cell_size": [cell_w, cell_h],
                 "tight_rect": [tight[0], tight[1], tw, th],
-                "size": [tw, th],
+                "tight_size": [tw, th],
                 "offset_in_cell": [ox, oy],
+                "output_size": [tw, th] if args.tight_crop else [cell_w, cell_h],
             }
             sliced += 1
 
