@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs
+
+- `README.md` rewritten to cover 0.3.x–0.4.x scope: documents all seven slash commands (the previous README had stopped at `style-gen` and `asset-pipeline`), adds a "What asset-pipeline auto-injects" section summarizing screen-flow planning / layer separation / 9-slice / atlas strict containment + `verify-atlas` regen loop / per-kind convention blocks / transparent-output magenta-key pipeline / sample-first gate, adds a kind-first manifest schema table, adds a `slice` vs `organize` comparison, updates the fork notice to mention all four fork-added commands, and adds Python 3 + Pillow to Requirements.
+
+## [0.4.7] - 2026-05-13 — asset-pipeline consolidates shared elements before drafting manifest
+
+### Added to `skills/asset-pipeline/SKILL.md`
+
+- **Step C — Consolidate identical/near-identical elements across screens.** This was the single most important planning step that was previously missing. Most assets in a real shipping product are SHARED across many screens (back arrow on every sub-screen, primary button on every CTA, modal frame on every dialog, HP icon in HUD and results screen). Per-screen asset drafting generates the same button 5–7 times across screens — wastes tokens, creates visual drift, and makes the manifest a guess instead of an audit.
+- Consolidation procedure: take every element from every screen's Step B table, group identical/near-identical elements by visual purpose, set each consolidated asset's pixel size to the LARGEST display size across all consumers (so it stays sharp at every site, never upscaled), and tag each consolidated asset with `used_by: [screen1, screen2, ...]` so the user can audit the sharing.
+- Worked examples baked into the SKILL.md table — three per-screen back arrows → ONE `nav-icons` atlas used by 5+ screens; four per-screen CTA buttons → ONE `buttons` atlas with primary/secondary/danger × states; three per-screen modal frames → ONE 9-slice `modal-frame`; HUD vs results vs bestiary HP icons → ONE 64×64 `hud-icons` atlas (downscaled at HUD).
+- **Step D — Present the consolidated resource list before drafting the manifest.** Adds a second user-approval gate that shows the consolidated list (Asset / Kind / Pixel size / Used by / Inferred?) before any manifest entry is written. Up to 3 refinement rounds.
+- Each manifest entry's `size` field must trace back to specific pixel measurements from Step B and carry forward the `used_by` array so future maintainers can see why the asset was sized the way it was.
+
+### Why
+
+During the second asset-pipeline test run, the planner drafted a per-screen manifest where the same back-arrow icon appeared as three separate items (`back-arrow-charselect`, `back-arrow-options`, `back-arrow-bestiary`), the same primary button appeared four times (`button-start-hunt`, `button-resume`, `button-quit`, `button-restart`), and three near-identical modal frames were planned separately (`pause-modal-frame`, `confirm-quit-frame`, `gameover-stats-frame`). The user (gmlxo76) pointed out that a real shipping product uses ONE shared asset for each of these. Without an explicit consolidation step the planner naturally produces inflated, drift-prone manifests; codifying Step C makes consolidation the rule, not an afterthought.
+
+## [0.4.6] - 2026-05-13 — asset-pipeline planning does screen-flow + element-size FIRST
+
+### Added to `skills/asset-pipeline/SKILL.md`
+
+- **Step 0 — Confirm target viewport** via `AskUserQuestion` before any planning. Options cover Mobile portrait (430×932 / 390×844 / 360×800), Mobile landscape, Tablet portrait, Desktop web (1440×900), and Mobile+Desktop responsive. Every downstream size calculation (atlas cell size, backdrop dimensions, icon pixel size) depends on this answer; without it, asset sizes are guesses.
+- **Step A — Enumerate every screen in the flow**, not just the one in the reference. Uses the existing inference rules to add overlays (level-up, pause, confirmation dialogs), error/empty states, transitions (loading), and meta screens (settings, bestiary, achievements) implied by the product type.
+- **Step B — Size every element on every screen** as a Y-range / pixel-rectangle table at the target viewport (`| Y range | Element | Size | Notes |`). Position (x, y, w, h) + display purpose, written per screen. The asset-list step is the LAST thing planned, not the first.
+- **Step E — Draft the manifest from Step B–D's pixel measurements.** Each `size` field must trace back to specific pixel dimensions in Step B (e.g. "cellW=64 because the stat-icons show at 64×64 in the character card stat row at viewport 430×932").
+
+### Why
+
+The previous planning flow jumped straight from "context string" to "list of PNGs to generate." Real shipping products need a screen-level design pass first, because the same visual element has a SPECIFIC PIXEL SIZE per screen and that pixel size determines the asset's source resolution, atlas cell size, and whether it can be shared with other screens. Skipping screen-level layout produced manifests where stat-icons were sized 256×256 ("just in case") for a screen that actually displays them at 64×64 — wasting tokens and producing visually mismatched output. Step 0–B force the layout to be done explicitly, in pixels, against a confirmed viewport.
+
+## [0.4.5] - 2026-05-12 — /codex-image:organize for kind-first engine layout
+
+### Added
+
+- **`/codex-image:organize <manifest.json> <target-dir>`** — new user-invoked slash command. Reads a `kind`-tagged manifest (asset-pipeline output) and copies every asset into a folder layout where the path itself describes how the engine should consume each asset.
+- **Target layout:**
+  - `atlas/<name>/<name>.png` + `atlas.json` + `<cell>.png × N` (sliced cells bundled if present)
+  - `sprite-sheet/<name>.png` (engine UV-steps at runtime)
+  - `tileset/floor/<name>.png` (seamless edge-to-edge ground fill)
+  - `tileset/objects/<name>.png` (standalone decoration sprites)
+  - `vfx-sheet/<name>.png` (flipbook animation)
+  - `font-sheet/<name>.png` (bitmap font / i18n labels)
+  - `fill-texture/<name>.png` (runtime composite layer)
+  - `single/<sub>/<name>.png` (one static illustration, subdir from `item.category` or inferred from source folder)
+  - `manifest.json` at the target root with all `items[].path` values rewritten to the new locations
+- **`scripts/organize.py`** — Python 3 stdlib (no Pillow); REMOVES the target directory if it exists, then writes fresh. Source manifest dir is never modified. Sliced cells picked up from `<src-dir>/<atlas-name>_sliced/` by default (`--no-sliced` to skip).
+- Optional `--only name1,name2,...` to filter, `--output-dir` for custom base.
+- **`skills/organize/SKILL.md`** — user-facing slash command definition.
+
+### Why
+
+An engine (or another AI agent) reading the folder name alone should know the asset's purpose AND how to load it. Without this layout, every downstream consumer has to scan the manifest and type-sniff each item — atlases want per-cell PNGs, sprite-sheets want the whole sheet for UV-stepping, floor tilesets want seamless edge-to-edge painting, VFX want flipbook playback. The kind-first folder names make the rendering contract self-documenting and remove the per-engine scan code.
+
+## [0.4.4] - 2026-05-12 — tilemap conventions
+
+### Added to `skills/asset-pipeline/SKILL.md`
+
+- **Tilemap Conventions** section with four rules auto-applied when a manifest item is a tileset:
+  1. **Floor tiles and object/decoration sprites are SEPARATE atlases** (`floor-<biome>.png` vs `objects-<biome>.png`). They are two different rendering passes — floor fills every map cell continuously; objects sit on top at specific spots. Packing them together complicates extraction and placement.
+  2. **Floor tiles are FLAT SQUARE, EDGE-TO-EDGE, NO PADDING.** Each tile fills 100% of its cell. No transparent corners, no diamond/hexagonal shape, no per-tile background gap. Safe-margin envelopes (used for icons/buttons) do NOT apply to floor tiles — even 1px of edge padding makes two adjacent tiles render with a visible gap in the stitched map.
+  3. **Floor tiles must be SEAMLESSLY TILEABLE.** Right edge column matches left edge column; top edge row matches bottom edge row. Patterns near edges flow continuously across the seam; no hard borders or vignettes. Different variants don't have to seam-match each other — only copies of themselves. Organic/noisy textures (dirt, grass, sand, stone) tile much better than geometric patterns. No centerpiece focal elements (they tile visibly when repeated 4×4).
+  4. **TOP-DOWN view only.** For top-down 2D games (Vampire Survivors, Hades, Diablo-like camera), no isometric perspective, no tilted edges, no drop shadows under the tile.
+- **Required prompt clauses for floor-tile generation** — auto-injected by the agent when a manifest item is `kind: "tileset"` (or has `subkind: "floor"`). Forces flat square + top-down + seamless + no centerpiece + uniform palette.
+- **Decoration/object tilesets** retain the standard atlas containment rules (safe margin, centered anchor, transparent background). Only floor/terrain tilesets get the seamless edge-to-edge rules.
+
+### Why
+
+Tilemaps have two fundamentally different rendering strategies (floor fill vs object placement) and AI generators conflate them by default — producing "graveyard tileset" outputs where tombstones are baked into floor cells, leaving the engine unable to tile the floor or place the decorations independently. The seamless tileability rule is similarly invisible: a tile that looks fine in isolation will produce visible seams when actually stitched into a map. Codifying these four rules into the SKILL.md moves what was tribal knowledge into auto-enforcement.
+
+## [0.4.3] - 2026-05-12 — transparent-output pipeline + manifest-driven slice + uniform centered cells
+
+### Added to `skills/asset-pipeline/SKILL.md`
+
+- **Transparent-Output Pipeline section** — five clauses auto-injected into every style-gen prompt for transparent items (which is most UI / sprite / icon items):
+  1. Force MAGENTA `#FF00FF` as the chroma-key background color (no green, no blue, no auto-pick).
+  2. Run `$CODEX_HOME/skills/.system/imagegen/scripts/remove_chroma_key.py --key #FF00FF` for alpha extraction; standard despill allowed.
+  3. LANCZOS resize to requested output dimensions is allowed (preserves content↔cell geometry).
+  4. **FORBIDDEN**: any per-pixel alpha-clearing pass that loops through cells and zeroes pixels within a margin envelope. This is the destructive step that Codex's default pipeline runs and that silently clips decoration tips (spike corners, glow halos, ornament fringes) the prompt deliberately placed inside the safe-margin guidance. Hard-cropping anything beyond a few border alignment pixels is also forbidden.
+  5. After resize + alignment crop, the result IS the final asset. Containment is then audited by `verify-atlas`; if violations are found, regenerate with stricter prompt-level instructions — never by overwriting pixels.
+
+### Added to `scripts/codex-image.mjs` + `skills/slice/SKILL.md`
+
+- **`slice --manifest <path>` mode** — reads a manifest and slices every item with `kind == "atlas"` using its declared grid / cells / safe_margin fields. One command slices an entire project at once. Non-atlas kinds (`sprite-sheet`, `font-sheet`, `tileset`, `vfx-sheet`, `fill-texture`, `single`) are intentionally skipped — they are consumed whole by the engine.
+- Flags: `--output-dir <base>` for custom base, `--only name1,name2,...` for filtering, `--no-sliced` skipped per-atlas.
+
+### Changed in `scripts/slice.py`
+
+- **Auto-bbox detection + integer pitch + centered paste are now defaults.** AI-generated atlases carry asymmetric canvas padding (e.g. L=33 T=17 R=28 B=39); slicing by `sheetW / cols` misaligns cells with where the content actually sits. Now the slicer detects the alpha bbox of the whole sheet and divides THAT area into cells.
+- Integer pitch + centered offset means every cell in an atlas has identical output dimensions (no ±1px rounding drift).
+- Per-cell content tight-bbox is detected and pasted centered onto a transparent cell-sized canvas, so AI-generated icons whose positions drift within their cells (skull top-left, hourglass top-right, arrow bottom-left) all come out as same-sized centered PNGs.
+- Override flags: `--tight-crop` (variable per-cell dimensions), `--no-recenter` (keep raw position), `--no-auto-bbox` (use raw canvas).
+
+### Why
+
+Three independent pain points, one release. (1) Codex's default transparency pipeline silently destroys requested decoration — observed multiple times with corner spikes and ornament fringes vanishing despite the prompt explicitly placing them inside the safe margin. (2) Per-atlas slicing was tedious for a 15-atlas batch. (3) AI-generated atlases drift in both canvas padding and per-cell content position, so engine-consumed per-cell PNGs were misaligned without manual fix-up. All three are now handled by default.
+
 ## [0.4.0] - 2026-05-12 — atlas strict containment + slice command
 
 ### Added
