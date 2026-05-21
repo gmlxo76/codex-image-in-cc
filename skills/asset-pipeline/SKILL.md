@@ -742,6 +742,186 @@ By locking the chroma key to magenta and forbidding the destructive enforcement 
 
 And for glow content where chroma-key would still leave colored fringes, Method A (luminance) removes the chroma key from the equation entirely — making clean luminous transparency feasible without per-asset color cleanup.
 
+## Multi-State Atlas Methodology — PIXEL-ALIGNED CELLS (CRITICAL)
+
+This block solves the single most painful problem when generating UI atlases:
+**cells that drift between frames.** When you ask an image generator for "two
+identical button states side by side", the model will silently draw each cell
+with slightly different center, scale, stroke weight, and icon position. The
+drift is invisible in the atlas image itself but obvious the moment your engine
+swaps cells at runtime — the button "jumps" by 5–40 px. Per-pixel realignment
+after the fact is expensive, brittle, and unnecessary if the prompt is built right.
+
+The prompt structure below is the way to force AI image generators to draw
+cells that share a pixel-identical base. Use the exact wording — vague
+phrasing like "two identical buttons" fails reliably.
+
+### Required prompt skeleton (template — fill in {placeholders})
+
+```
+TASK: Render a {COLS}×{ROWS} STATE ATLAS on a single canvas.
+
+CANVAS: exactly {CANVAS_W} × {CANVAS_H} pixels. Divide into a grid of
+{COLS} columns × {ROWS} rows, where each cell is exactly {CELL_W} × {CELL_H}
+pixels. Cell (col, row) occupies pixels (col*{CELL_W}, row*{CELL_H}) to
+((col+1)*{CELL_W}-1, (row+1)*{CELL_H}-1).
+
+THE BASE SUBJECT IS IDENTICAL IN EVERY CELL.
+
+Base subject (drawn in EVERY cell at the same position, same size, same
+rotation, same icon detail):
+{BASE_SUBJECT_DESCRIPTION}
+
+The base subject's geometric center MUST sit at the exact CENTER of each
+cell — i.e., at pixel ({CELL_W}/2 + col*{CELL_W}, {CELL_H}/2 + row*{CELL_H}).
+The base subject's BOUNDING BOX must be the SAME pixel dimensions in every
+cell. The icon inside the subject (mic, speaker, dots, etc.) must appear at
+the SAME relative position inside the subject in every cell.
+
+PER-CELL DIFFERENCES (ONLY these may differ between cells — the base subject
+itself is pixel-identical otherwise):
+
+Cell [0] (col=0, row=0) — state name "{STATE_0_NAME}":
+{STATE_0_DELTA}
+
+Cell [1] (col=1, row=0) — state name "{STATE_1_NAME}":
+{STATE_1_DELTA}
+
+(...continue for each cell...)
+
+ENFORCEMENT: do NOT redraw the base subject from scratch per cell. Treat the
+base subject as a fixed stamp placed identically in every cell. Then OVERLAY
+the per-cell delta on top of that stamp.
+
+ANTI-PATTERNS — DO NOT do any of these:
+- Do NOT shift the subject's center between cells.
+- Do NOT scale the subject differently between cells.
+- Do NOT redraw the icon at a different rotation, position, or detail level.
+- Do NOT vary stroke width / line weight between cells.
+- Do NOT let glow / decoration from one cell bleed across the cell boundary.
+
+BACKGROUND: pure solid {BG_COLOR} fills all areas not covered by the subject
+or its per-cell delta. The boundary between cells is a hard {BG_COLOR} line
+— no glow, no halo crosses it.
+```
+
+### How to fill the template — worked examples
+
+**Example A: 2-frame button atlas (default + pressed) for a circular mobile UI button**
+
+```
+TASK: Render a 2×1 STATE ATLAS on a single canvas.
+
+CANVAS: exactly 768 × 384 pixels. Divide into a grid of 2 columns × 1 row,
+where each cell is exactly 384 × 384 pixels.
+  Cell (0,0) occupies pixels (0, 0) to (383, 383).
+  Cell (1,0) occupies pixels (384, 0) to (767, 383).
+
+THE BASE SUBJECT IS IDENTICAL IN EVERY CELL.
+
+Base subject (drawn in EVERY cell at the same position, same size, same
+icon detail):
+  A circular button. Outer diameter ≈ 88% of the cell (≈ 338 px). Centered
+  at the cell center. Thin gold ring border (~7 px stroke, pale warm gold
+  #D4A574). Solid very dark interior fill (#0a0a0a). A bold gold line-art
+  SPEAKER icon centered inside the ring (trapezoidal cone on the left +
+  single curved sound wave on the right, 6 px strokes, same pale gold).
+
+The base subject's center sits at:
+  - Cell (0,0): pixel (192, 192)
+  - Cell (1,0): pixel (576, 192)
+The button's bounding box is the same pixel size in both cells. The speaker
+icon appears at the same relative position inside the ring in both cells.
+
+PER-CELL DIFFERENCES:
+
+Cell (0,0) — state "default":
+  Ring color #D4A574. Interior fill #0a0a0a. No glow halo, no outer ring.
+
+Cell (1,0) — state "pressed":
+  Ring color #E8C088 (brighter). Interior fill #251F15 (warm-lifted). No
+  outer glow halo, no outer ring. The button is illuminated FROM WITHIN —
+  it does NOT grow larger and its outline does NOT shift.
+
+BACKGROUND: solid black (#000000) everywhere outside the buttons. The
+boundary at pixel x=384 is a hard black line — no glow crosses it.
+```
+
+**Example B: main-CTA mic with single ring (default) → double ring + glow (pressed)**
+
+```
+TASK: Render a 2×1 STATE ATLAS on a single canvas.
+
+CANVAS: exactly 1536 × 768 pixels. Cell size 768 × 768.
+  Cell (0,0): pixels (0,0) – (767, 767), center at (384, 384).
+  Cell (1,0): pixels (768,0) – (1535, 767), center at (1152, 384).
+
+THE BASE SUBJECT IS IDENTICAL IN EVERY CELL.
+
+Base subject (in EVERY cell, identical pixels):
+  A circular microphone button. Diameter ≈ 420 px (≈ 55% of cell).
+  Centered at the cell center. Bold gold ring border (~9 px stroke,
+  #D4A574). Solid dark interior #0a0a0a. Bold gold line-art microphone
+  icon (capsule head + stem + base bracket, ~8 px strokes, #D4A574)
+  centered inside the ring.
+
+Base subject center:
+  - Cell (0,0): pixel (384, 384)
+  - Cell (1,0): pixel (1152, 384)
+
+PER-CELL DIFFERENCES (overlay only — base subject pixels stay identical):
+
+Cell (0,0) — state "default" (idle):
+  A soft warm gold halo extends ~80 px outward from the ring, fading
+  smoothly to black. Single halo, no outer ring.
+
+Cell (1,0) — state "pressed" (LIVE recording):
+  A SECOND concentric gold ring at radius +35 px from the base ring,
+  ~7 px stroke, color #D4A574. Plus a stronger, wider gold halo that
+  fades to black at the cell edges. The base subject (inner ring +
+  microphone icon) is UNCHANGED from cell (0,0) — same pixel position,
+  same size, same stroke.
+
+BACKGROUND: pure black (#000000). The pixel column at x=768 is a hard
+boundary — no halo from cell (1,0) crosses into cell (0,0).
+```
+
+### Why this prompt structure works (and vague ones don't)
+
+| Element | Why it matters |
+|---|---|
+| Explicit pixel coordinates for cell bounds AND subject center | The model has been seen to "drift" by 5–40 px when given just "centered" — giving exact pixel values reduces drift to 0–3 px on most outputs. |
+| Splitting "base subject" (identical) from "per-cell delta" (allowed to differ) | The model treats the base as a stamp and the delta as an overlay, instead of regenerating each cell from scratch. |
+| ENFORCEMENT clause + ANTI-PATTERNS list | Image generators ignore single-sentence constraints. Repeating the constraint as both a positive enforcement and a list of forbidden behaviors raises adherence. |
+| Hard background between cells | Without an explicit boundary rule, glow halos from one cell bleed into the next, making per-cell slicing unreliable. |
+
+### Verification step (mandatory after generation)
+
+After generation, read the resulting atlas and verify by visual inspection:
+
+1. Open both cells side-by-side. The base subject (button outline, icon
+   position, stroke weight) must look IDENTICAL between cells. The only
+   visible difference is the per-cell delta.
+2. Slice the atlas by the declared grid (e.g., 2×1 at 384×384). Each
+   sliced cell, viewed independently, must have its subject visibly
+   centered (the subject's bounding box midpoint within ~3 px of the
+   cell center).
+3. If either check fails, the atlas is misaligned — regenerate with even
+   stricter pixel coordinates, OR fall back to per-cell post-realignment
+   via `/codex-image:realign-atlas` (last resort; loses some quality
+   because of the integer-pixel shift).
+
+### Don't try these (known failures)
+
+- "Two identical buttons side by side" without pixel coordinates → cells drift.
+- "Same button, just brighter on the right" without enumerating what must stay
+  fixed → the model brightens AND moves AND resizes the button.
+- "Make sure both buttons are exactly the same size" without saying *what*
+  reference defines the size → the model picks a size per cell.
+- Generating each cell as a separate image and stitching them yourself →
+  AI variance between generation calls is worse than within-call drift; the
+  cells will look like different buttons entirely.
+
 ## Atlas Strict Containment Conventions (CRITICAL — auto-applied for all atlas/sheet items)
 
 This block is the single most important rule for sheet-style assets. AI image generators DO NOT respect grid boundaries by default. Buttons leak across cells, headers extend into neighbouring rows, icons drift to edges. When the resulting sheet is later sliced by uniform grid, content gets clipped at cell boundaries.

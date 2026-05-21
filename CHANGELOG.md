@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `README.md` rewritten to cover 0.3.x–0.4.x scope: documents all seven slash commands (the previous README had stopped at `style-gen` and `asset-pipeline`), adds a "What asset-pipeline auto-injects" section summarizing screen-flow planning / layer separation / 9-slice / atlas strict containment + `verify-atlas` regen loop / per-kind convention blocks / transparent-output magenta-key pipeline / sample-first gate, adds a kind-first manifest schema table, adds a `slice` vs `organize` comparison, updates the fork notice to mention all four fork-added commands, and adds Python 3 + Pillow to Requirements.
 
+## [0.4.9] - 2026-05-21 — multi-state atlas prompt methodology + realign-atlas safety net
+
+### Added to `skills/asset-pipeline/SKILL.md`
+
+- **"Multi-State Atlas Methodology — PIXEL-ALIGNED CELLS"** — new section documenting the prompt structure required to get AI image generators to draw atlas cells that share a pixel-identical base. Includes a required prompt skeleton (template with `{placeholders}`), two worked examples (default/pressed button at 768×384; main-CTA mic with single-ring default → double-ring + glow pressed at 1536×768), a table explaining why each clause matters, a mandatory verification step, and a list of known-failure phrasings to avoid ("two identical buttons side by side", "same button just brighter", per-cell separate generation, etc.).
+- **Why:** the user's pain point was that vague atlas prompts produce cells that drift by 5–40 px between frames (different center, scale, stroke weight, icon position). Per-pixel post-realignment is brittle and lossy. The fix is to PREVENT drift at the prompt level with explicit pixel coordinates, an enforced base subject, an enumerated list of allowed per-cell deltas, hard-background between cells, and repeated ENFORCEMENT + ANTI-PATTERNS clauses. The methodology is prescriptive — agents fill the template instead of paraphrasing.
+
+### Added to `skills/style-gen/SKILL.md`
+
+- New "If the user is asking for a multi-state atlas" section that points at the asset-pipeline methodology and explicitly warns against vague atlas prompts and against per-cell separate-call generation (which has worse drift than within-call drift). Also documents the `realign-atlas` fallback for when an existing atlas has already drifted.
+
+### Added — fallback recovery command
+
+- **`scripts/realign_atlas.py`** + **`/codex-image:realign-atlas <atlas.png> --grid CxR [--align-by ring|bbox|centroid|none]`** dispatcher in `scripts/codex-image.mjs`. Last-resort tool: slices an existing atlas, detects an alignment anchor in each cell (ring center, bbox center, or alpha-weighted centroid), shifts each cell's content to its geometric center, recomposes into a new atlas. Optional `--write-cells <dir>` writes the realigned per-cell PNGs; optional `--write-json` writes an atlas.json sidecar with cell coordinates. Documented as a last resort — the prompt methodology should be tried first because realignment loses a few px from the integer shift.
+- The `ring` detection mode requires scipy and handles concentric multi-ring cases correctly (picks the inner ring as the anchor, so the main button core lands at canvas center even when the outer ring + glow halo are asymmetric).
+
+### Why
+
+While dogfooding the 0.4.8 luminance pipeline on a multi-state UI atlas (gold-themed live-streaming buttons with default + pressed states), the user repeatedly hit the cell-drift problem: even with very explicit prompts asking for "pixel-identical cells", the AI drew each cell with subtly different center, scale, and icon position. Post-hoc realignment via centroid/ring detection works but is expensive (multiple python rounds, multiple AI consultations to get the detection right) and lossy (each integer shift bleeds a sub-pixel of edge detail). The 0.4.9 work codifies a prompt skeleton that has been observed in practice to produce within-3-px alignment, eliminating the post-processing burden for most atlas generations. The `realign-atlas` command stays as a safety net for when methodology fails or for legacy atlases that need to be salvaged.
+
 ## [0.4.8] - 2026-05-21 — luminance-based alpha extraction for glow / VFX content
 
 ### Added

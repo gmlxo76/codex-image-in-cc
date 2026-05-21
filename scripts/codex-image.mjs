@@ -699,6 +699,28 @@ function runPythonSlice(argv, verifyOnly) {
   process.exitCode = result.status ?? 0;
 }
 
+function handleRealignAtlas(argv) {
+  const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "realign_atlas.py");
+  const py = process.platform === "win32" ? "python" : "python3";
+  const result = spawnSync(py, [scriptPath, ...argv], {
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  if (result.error && result.error.code === "ENOENT") {
+    console.error(
+      "realign-atlas: Python interpreter not found.\n" +
+      "Install Python 3 and dependencies:\n" +
+      "  Windows: https://www.python.org/downloads/  then `pip install Pillow numpy scipy`\n" +
+      "  macOS:   `brew install python3` then `pip3 install Pillow numpy scipy`\n" +
+      "  Linux:   `apt install python3 python3-pip` then `pip3 install Pillow numpy scipy`\n" +
+      "  (scipy is optional but enables the recommended --align-by=ring mode.)"
+    );
+    process.exitCode = 2;
+    return;
+  }
+  process.exitCode = result.status ?? 0;
+}
+
 function handleStatus(argv) {
   const options = parseStatusOptions(argv);
   if (options.help) {
@@ -737,6 +759,11 @@ function usage() {
     "                                                      Reorganize an asset-pipeline manifest into kind-first layout",
     "                                                      (atlas/<name>/, sprite-sheet/, tileset/{floor,objects}/, vfx-sheet/,",
     "                                                      font-sheet/, fill-texture/, single/<sub>/). Writes new manifest.",
+    "  realign-atlas <atlas.png> --grid CxR [--align-by ring|bbox|centroid|none] [--output <path>]",
+    "                                                      Last-resort: slice an existing atlas, auto-center each cell's content by",
+    "                                                      detected anchor (ring/bbox/centroid), recompose. Use when an AI-generated",
+    "                                                      atlas has drifted cells. PREFER the prompt methodology in",
+    "                                                      asset-pipeline SKILL.md to AVOID drift in the first place.",
     "",
     "Each command is also exposed as a Claude Code plugin skill:",
     "  /codex-image:status",
@@ -795,6 +822,11 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === "organize") {
     handleOrganize(rest);
+    return;
+  }
+
+  if (command === "realign-atlas") {
+    handleRealignAtlas(rest);
     return;
   }
 

@@ -50,6 +50,25 @@ The flag is stripped from the prompt before the request reaches Codex. The dispa
 
 **Caveat — dark content:** the luminance method makes ALL dark pixels transparent (since dark = low brightness = low alpha). Intentionally dark subjects (black armor, dark backgrounds, shadows) will go semi-transparent or disappear. Use chroma key for those.
 
+## If the user is asking for a multi-state atlas (default/pressed/hover/etc.)
+
+Pass-through prompts like "two button states side by side" produce atlases where
+cells DRIFT — the AI draws each cell with slightly different center, scale, and
+stroke weight, so a runtime frame swap visibly jumps. Vague prompts will fail
+reliably; you must build the prompt with explicit per-cell pixel coordinates,
+an enforced base subject, and an enumerated list of allowed per-cell deltas.
+
+The full prompt skeleton + filled examples (default/pressed button, mic with
+double-ring pressed state) are documented in
+[`skills/asset-pipeline/SKILL.md` → "Multi-State Atlas Methodology — PIXEL-ALIGNED CELLS"](../asset-pipeline/SKILL.md).
+Copy the skeleton and fill the placeholders for the user's specific request
+before invoking the dispatcher. Do NOT shortcut with vague phrasing.
+
+If a previously-generated atlas has already drifted, the fallback recovery
+command is `/codex-image:realign-atlas <atlas.png> --grid CxR --align-by ring`.
+This is a last resort — it works but loses a few px of quality from the integer
+shift; prefer fixing the prompt and regenerating.
+
 ## If the user is asking for a sprite sheet
 
 Pass-through prompts that just say "make a sprite sheet of X" will reliably produce a grid where each cell has a different character scale, anchor, and effect overflow — useless for game engines that slice by `(cell × index)`. The constraints below MUST be added to the user's prompt before invoking the dispatcher. See [asset-pipeline SKILL.md](../asset-pipeline/SKILL.md) for the full spec; the must-have minimum is:
