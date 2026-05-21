@@ -196,6 +196,12 @@ function renderStatusReport(report) {
   lines.push('  /codex-image:style-gen reference.png "A coin in this exact style, transparent bg, save to assets/coin.png at 512x512"');
   lines.push('  /codex-image:asset-pipeline reference.png "RPG mobile game: 5 enemies + 10 items + 4 backgrounds"');
   lines.push("");
+  lines.push("Transparency methods (auto-detected from prompt, override with --transparency=...):");
+  lines.push("  --transparency=luminance   Render on black, extract alpha from brightness — best for glow/VFX/light");
+  lines.push("  --transparency=chroma      Render on magenta key, subtract — best for flat icons/items/characters");
+  lines.push("  --transparency=auto        (default) Pick based on keywords in the prompt");
+  lines.push("  --transparency=none        Skip the transparency pipeline entirely");
+  lines.push("");
   lines.push("Cost note: image generation runs a Codex agent turn and uses the Codex built-in image generation tool.");
 
   if (report.nextSteps.length > 0) {
@@ -264,6 +270,154 @@ User generate request (visual style must match the attached reference):
 
 `;
 
+// Keywords that strongly indicate luminance-based alpha extraction is the right
+// method (glow / VFX / luminous content). These are heuristics, not exhaustive —
+// users can always override with an explicit --transparency= flag.
+const LUMINANCE_KEYWORDS = [
+  // English
+  "glow", "glowing", "glow halo", "halo", "halos", "luminous", "luminescent",
+  "radiant", "radiance", "neon", "vfx", "particle", "particles", "sparkle",
+  "sparkles", "sparkling", "shimmer", "shimmering", "ember", "embers",
+  "flame", "flames", "fire", "lightning", "spark", "sparks", "magical",
+  "magic effect", "aura", "auras", "lens flare", "light source", "lit ring",
+  "shining", "shine", "bright halo", "bright ring", "double ring",
+  // Common Korean equivalents (the plugin is used in Korean projects too)
+  "글로우", "발광", "빛나는", "네온", "광원", "후광", "오라", "파티클",
+  "반짝", "스파크", "광휘", "할로", "엠버", "이중 링", "더블 링"
+];
+
+const TRANSPARENCY_FLAG_RE = /(?:^|\s)--transparency(?:=|\s+)(auto|luminance|luma|chroma|magenta|none|off)\b/i;
+const TRANSPARENT_REQUEST_RE = /\btransparent\b|\btransparency\b|투명/i;
+
+function extractTransparencyFlag(rawPrompt) {
+  // Returns { method, prompt } where prompt has the flag stripped.
+  const m = rawPrompt.match(TRANSPARENCY_FLAG_RE);
+  if (!m) {
+    return { method: null, prompt: rawPrompt };
+  }
+  let method = m[1].toLowerCase();
+  if (method === "luma") method = "luminance";
+  if (method === "magenta") method = "chroma";
+  if (method === "off") method = "none";
+  // Strip the flag plus leading whitespace.
+  const stripped = (rawPrompt.slice(0, m.index) + rawPrompt.slice(m.index + m[0].length)).replace(/\s{2,}/g, " ").trim();
+  return { method, prompt: stripped };
+}
+
+function autoDetectTransparencyMethod(prompt) {
+  if (!TRANSPARENT_REQUEST_RE.test(prompt)) {
+    return "none";
+  }
+  const lower = prompt.toLowerCase();
+  for (const kw of LUMINANCE_KEYWORDS) {
+    if (lower.includes(kw.toLowerCase())) {
+      return "luminance";
+    }
+  }
+  return "chroma";
+}
+
+function luminanceScriptPath() {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), "luminance_alpha.py");
+}
+
+function buildLuminancePipelineClause() {
+  const scriptPath = luminanceScriptPath();
+  const pyBin = process.platform === "win32" ? "python" : "python3";
+  return `
+
+TRANSPARENT OUTPUT — LUMINANCE-BASED ALPHA EXTRACTION (mandatory pipeline):
+
+This asset has luminous / glow / VFX content. DO NOT use magenta chroma key —
+the semi-transparent glow pixels would blend with magenta and leave colored
+fringe artifacts that no chroma-key removal can fully repair.
+
+Required pipeline:
+
+1. RENDER ON SOLID BLACK BACKGROUND (#000000). Do NOT use magenta, green, or
+   any other chroma key. Paint the entire image — including the area outside
+   the subject — on pure black. The glow naturally fades from bright color
+   to pure black at its edges.
+
+2. After image_gen produces the raw black-background PNG, run this helper to
+   recover alpha from brightness:
+
+       ${pyBin} "${scriptPath}" <raw-black-bg.png> <final-rgba.png> --size WxH
+
+   This computes alpha = max(R, G, B) per pixel, so:
+       - pure black pixels → fully transparent
+       - bright gold/light pixels → fully opaque
+       - dim glow edges → naturally semi-transparent (smooth alpha falloff)
+
+   The script preserves the RGB channels untouched. No color contamination is
+   possible because no chroma key color ever touched the image.
+
+3. DO NOT run remove_chroma_key.py for this asset. DO NOT use any chroma-key
+   alpha extraction. DO NOT add an alpha-clearing post-pass.
+
+4. The output of step 2 IS the final asset — save directly at the requested
+   output path.
+
+5. Use --formula max (default) to keep colored glow saturated. Use --formula
+   luma only if the content is achromatic (pure white light).
+
+6. If the asset has both a luminous element AND an intentionally dark solid
+   fill (e.g. a glow ring around a dark button core), expect the dark core
+   to become transparent. When that's not desired, the agent should either:
+   (a) accept it (the asset will sit on a dark UI background that naturally
+   fills the transparent core), or (b) ask the user whether to composite a
+   solid dark fill back in.`;
+}
+
+function buildChromaPipelineClause() {
+  return `
+
+TRANSPARENT OUTPUT — CHROMA-KEY ALPHA EXTRACTION (mandatory pipeline):
+
+This asset is a flat / opaque-content sprite (icon, item, character, etc.) —
+chroma key is the right method because the subject has well-defined edges and
+no large luminous glow regions that would bleed.
+
+Required pipeline:
+
+1. CHROMA KEY: use MAGENTA #FF00FF as the chroma-key background colour. Do not
+   use green, blue, or any other key colour. Pure magenta (255, 0, 255) is the
+   only allowed key. This colour never appears in the requested art and is
+   unambiguous to extract.
+
+2. ALPHA EXTRACTION: after generation, run the Codex imagegen helper
+   \`$CODEX_HOME/skills/.system/imagegen/scripts/remove_chroma_key.py\` to
+   convert the magenta key to alpha. Pass --auto-key border or explicit
+   --key #FF00FF. Standard despill is allowed.
+
+3. ALLOWED after alpha extraction: LANCZOS resize to the requested output
+   dimensions.
+
+4. FORBIDDEN after alpha extraction: any per-pixel ALPHA-CLEARING pass that
+   loops through cells and zeroes pixels within a margin envelope. NO
+   destructive containment enforcement. NO hard cropping of content beyond
+   a few border pixels for grid alignment.
+
+5. After resize, the result IS the final asset — save directly at the requested
+   output path.`;
+}
+
+function applyTransparencyPipeline(rawPrompt) {
+  // Decide transparency method and append the pipeline clause if applicable.
+  const { method: explicit, prompt: stripped } = extractTransparencyFlag(rawPrompt);
+  let method = explicit;
+  if (!method || method === "auto") {
+    method = autoDetectTransparencyMethod(stripped);
+  }
+  let suffix = "";
+  if (method === "luminance") {
+    suffix = buildLuminancePipelineClause();
+  } else if (method === "chroma") {
+    suffix = buildChromaPipelineClause();
+  }
+  return { prompt: stripped + suffix, method };
+}
+
 function spawnCodex(args, cwd) {
   return new Promise((resolve, reject) => {
     const inv = codexInvocation();
@@ -281,11 +435,15 @@ function spawnCodex(args, cwd) {
 }
 
 async function handleGenerate(argv) {
-  const prompt = (argv.join(" ") || "").trim();
-  if (!prompt) {
+  const rawPrompt = (argv.join(" ") || "").trim();
+  if (!rawPrompt) {
     console.error("Usage: /codex-image:generate <natural-language image request>");
     process.exitCode = 1;
     return;
+  }
+  const { prompt, method } = applyTransparencyPipeline(rawPrompt);
+  if (method && method !== "none") {
+    console.error(`[codex-image] transparency method: ${method}`);
   }
   const cwd = process.cwd();
   const codexArgs = [
@@ -305,8 +463,8 @@ async function handleGenerate(argv) {
 
 async function handleEdit(argv) {
   const raw = argv.join(" ").trim();
-  const { input, prompt } = splitFirstToken(raw);
-  if (!input || !prompt) {
+  const { input, prompt: rawPrompt } = splitFirstToken(raw);
+  if (!input || !rawPrompt) {
     console.error("Usage: /codex-image:edit <input-path> <edit instructions>");
     process.exitCode = 1;
     return;
@@ -317,6 +475,10 @@ async function handleEdit(argv) {
     console.error(`Input image not found: ${inputPath}`);
     process.exitCode = 1;
     return;
+  }
+  const { prompt, method } = applyTransparencyPipeline(rawPrompt);
+  if (method && method !== "none") {
+    console.error(`[codex-image] transparency method: ${method}`);
   }
   const codexArgs = [
     "exec",
@@ -356,8 +518,8 @@ function handleParseArgs(argv) {
 
 async function handleStyleGen(argv) {
   const raw = argv.join(" ").trim();
-  const { input, prompt } = splitFirstToken(raw);
-  if (!input || !prompt) {
+  const { input, prompt: rawPrompt } = splitFirstToken(raw);
+  if (!input || !rawPrompt) {
     console.error("Usage: /codex-image:style-gen <reference-path> <generate instructions>");
     process.exitCode = 1;
     return;
@@ -368,6 +530,10 @@ async function handleStyleGen(argv) {
     console.error(`Reference image not found: ${inputPath}`);
     process.exitCode = 1;
     return;
+  }
+  const { prompt, method } = applyTransparencyPipeline(rawPrompt);
+  if (method && method !== "none") {
+    console.error(`[codex-image] transparency method: ${method}`);
   }
   const codexArgs = [
     "exec",
@@ -643,8 +809,13 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
 }
 
 export {
+  applyTransparencyPipeline,
+  autoDetectTransparencyMethod,
+  buildChromaPipelineClause,
+  buildLuminancePipelineClause,
   buildStatusReport,
   compareSemver,
+  extractTransparencyFlag,
   parseSemver,
   renderStatusReport,
   splitFirstToken,

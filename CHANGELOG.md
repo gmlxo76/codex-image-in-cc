@@ -11,6 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `README.md` rewritten to cover 0.3.x–0.4.x scope: documents all seven slash commands (the previous README had stopped at `style-gen` and `asset-pipeline`), adds a "What asset-pipeline auto-injects" section summarizing screen-flow planning / layer separation / 9-slice / atlas strict containment + `verify-atlas` regen loop / per-kind convention blocks / transparent-output magenta-key pipeline / sample-first gate, adds a kind-first manifest schema table, adds a `slice` vs `organize` comparison, updates the fork notice to mention all four fork-added commands, and adds Python 3 + Pillow to Requirements.
 
+## [0.4.8] - 2026-05-21 — luminance-based alpha extraction for glow / VFX content
+
+### Added
+
+- **`scripts/luminance_alpha.py`** — new standalone helper that converts a black-background PNG into an RGBA PNG with alpha derived from pixel brightness (`alpha = max(R, G, B)` by default; `--formula luma` and `--formula avg` available). Supports `--size WxH` LANCZOS resize, `--black-threshold` / `--white-cutoff` for alpha curve shaping, `--gamma` for edge softness, and `--premultiply` for additive/screen compositing. Provides a clean alternative to the magenta chroma-key pipeline for luminous content (glow, neon, VFX, light sources) where chroma blending leaves colored fringe artifacts.
+- **Auto-detect transparency method in `scripts/codex-image.mjs`** — new `applyTransparencyPipeline()` helper that inspects the user prompt for luminance-trigger keywords (English: `glow`, `luminous`, `neon`, `vfx`, `halo`, `particle`, `sparkle`, `radiance`, `aura`, `lightning`, `ember`, `flame`, `magical`, `lens flare`, ...; Korean: `글로우`, `발광`, `빛나는`, `네온`, `광원`, `후광`, `오라`, `파티클`, `반짝`, `스파크`, `광휘`, `할로`, `이중 링`, ...) and selects luminance vs chroma-key automatically. Wired into `handleGenerate` / `handleEdit` / `handleStyleGen`. The chosen method is logged to stderr as `[codex-image] transparency method: <method>`.
+- **`--transparency=<auto|luminance|chroma|none>` flag** — explicit override inside the natural-language prompt. The flag is stripped from the prompt before the request reaches Codex CLI. Aliases: `luma` → `luminance`, `magenta` → `chroma`, `off` → `none`.
+
+### Changed
+
+- **`skills/style-gen/SKILL.md`** — new "Transparency: luminance vs chroma key (auto-detected)" section documents the two pipelines, when to use each, the keyword auto-detection rules, and the explicit override flag. Includes a caveat about dark intentional content under the luminance method.
+- **`skills/asset-pipeline/SKILL.md` Transparent-Output Pipeline section** — restructured into Method A (luminance, for luminous content) and Method B (chroma key, for flat content) with a method-selection decision tree. The agent is instructed to inject the matching pipeline clause as belt-and-suspenders enforcement (in addition to the dispatcher's auto-detection) and to document the chosen method in the manifest.
+
+### Why
+
+While generating luxury gold UI buttons with strong glow halos against the magenta chroma key (`#FF00FF`), the soft edges of the glow consistently came back with purple/pink fringe contamination. The chroma-key removal cannot fully recover the original color of semi-transparent gold pixels that blended with magenta during generation — the dim gold + magenta produces purple, and that purple is neither pure magenta nor pure gold, so subtracting magenta leaves a colored ring around the glow. The luminance method side-steps the problem entirely: render on solid black, recover alpha from brightness. No chroma key color ever exists in the image, so semi-transparent glow pixels stay the color they were drawn. The natural brightness falloff of a glow becomes a natural alpha falloff — clean, no fringe. This is the same technique game engines have used for VFX / light sprites for decades.
+
+The auto-detection keeps the magenta pipeline as the default safe choice for flat content (icons, items, characters, tilesets), but routes glow / VFX prompts to luminance without the user having to know either method exists. Explicit flags are available for the cases auto-detection guesses wrong.
+
 ## [0.4.7] - 2026-05-13 — asset-pipeline consolidates shared elements before drafting manifest
 
 ### Added to `skills/asset-pipeline/SKILL.md`

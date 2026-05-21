@@ -28,6 +28,28 @@ Behavior notes:
 - The reference image itself is never modified or saved. Only newly generated images are written to disk.
 - Output path, size, count, transparency, and quality are all controlled via natural language inside the prompt (this command exposes no flags — same convention as `/codex-image:generate`).
 
+## Transparency: luminance vs chroma key (auto-detected)
+
+When the user asks for a transparent output, the dispatcher auto-selects one of two pipelines based on keywords in the prompt:
+
+| Method | When | Why |
+|---|---|---|
+| **Luminance alpha** | Prompt mentions glow / luminous / neon / VFX / halo / particles / sparkle / fire / lightning / radiance / aura / 글로우 / 발광 / 빛나는 / 네온 / 후광 | Renders on solid black, recovers alpha from pixel brightness (`alpha = max(R, G, B)`). No chroma key color exists in the image, so semi-transparent glow pixels can't pick up colored fringes. Natural brightness falloff becomes natural alpha falloff. |
+| **Chroma key** (default for transparent) | Prompt asks for transparency but contains no luminous keywords (icons, items, characters, props) | Renders on magenta (#FF00FF), subtracts to alpha. Robust for flat-edged subjects with no large soft-edged glow regions. |
+
+Users can override the auto-detection with an explicit flag inside the prompt:
+
+- `--transparency=luminance` — force luminance method
+- `--transparency=chroma` — force chroma-key method
+- `--transparency=auto` — explicit auto (same as default)
+- `--transparency=none` — disable the transparency pipeline entirely
+
+The flag is stripped from the prompt before the request reaches Codex. The dispatcher writes the chosen method to stderr as `[codex-image] transparency method: <method>` so the caller can verify.
+
+**Why this matters:** generating luminous content (glow rings, neon icons, magical particles) against a magenta chroma key has been observed to leave purple/pink fringes on the soft edges of glow, because semi-transparent gold pixels visually blend with magenta during generation. The luminance method side-steps the problem entirely by never introducing a chroma key color in the first place.
+
+**Caveat — dark content:** the luminance method makes ALL dark pixels transparent (since dark = low brightness = low alpha). Intentionally dark subjects (black armor, dark backgrounds, shadows) will go semi-transparent or disappear. Use chroma key for those.
+
 ## If the user is asking for a sprite sheet
 
 Pass-through prompts that just say "make a sprite sheet of X" will reliably produce a grid where each cell has a different character scale, anchor, and effect overflow — useless for game engines that slice by `(cell × index)`. The constraints below MUST be added to the user's prompt before invoking the dispatcher. See [asset-pipeline SKILL.md](../asset-pipeline/SKILL.md) for the full spec; the must-have minimum is:

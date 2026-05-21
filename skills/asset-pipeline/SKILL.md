@@ -632,7 +632,49 @@ Object atlases (gravestones, columns, lanterns, etc.) DO use the standard atlas 
 
 Codex CLI's built-in `imagegen` skill produces transparency by generating on a chroma-key background and then locally running `remove_chroma_key.py` to convert that key color to alpha. By default Codex picks its own chroma color (often green `#03f904`) and frequently chains an additional "atlas containment enforcement" post-processing pass that ZEROES PIXELS within the cell margin envelope — this is destructive and silently clips decoration tips (corner spikes, glow halos, ornament fringes) the prompt asked for.
 
-**The agent MUST control the transparent pipeline by adding the following clauses to every transparent-output style-gen prompt, before invoking the dispatcher:**
+**Two methods are available** — chroma-key (default for flat content) and luminance (for glow / VFX / luminous content). As of v0.4.8 the dispatcher auto-detects which method to use based on keywords in the prompt; the agent should still inject the matching pipeline clause explicitly when building style-gen prompts, both as a belt-and-suspenders enforcement and to document the choice in the manifest.
+
+### Method A — Luminance alpha (for luminous / glow / VFX content)
+
+When the asset is glow-heavy (gold halos, neon rings, magical particles, fire, lightning, sparkles, light sources), chroma-key extraction leaves colored fringes on the soft edges of the glow because semi-transparent gold/light pixels visually blend with the magenta key during generation, and no chroma-key removal can fully recover the original color.
+
+The luminance method side-steps this entirely: render on solid black, recover alpha from pixel brightness.
+
+```
+TRANSPARENT OUTPUT — LUMINANCE-BASED ALPHA EXTRACTION (mandatory):
+
+This asset has luminous / glow / VFX content. DO NOT use magenta chroma key.
+
+1. RENDER ON SOLID BLACK BACKGROUND (#000000). Do NOT use magenta, green,
+   or any other chroma key. Paint the entire image — including the area
+   outside the subject — on pure black. The glow naturally fades from
+   bright color to pure black at its edges.
+
+2. After image_gen produces the raw black-background PNG, run the plugin
+   helper to recover alpha from brightness:
+
+       python "${CLAUDE_PLUGIN_ROOT}/scripts/luminance_alpha.py" \
+              <raw-black-bg.png> <final-rgba.png> --size WxH
+
+   This computes alpha = max(R, G, B) per pixel, so:
+     - pure black pixels        → fully transparent
+     - bright gold/light pixels → fully opaque
+     - dim glow edges           → naturally semi-transparent (smooth falloff)
+
+3. DO NOT run remove_chroma_key.py for this asset. DO NOT use chroma-key
+   alpha extraction. DO NOT add an alpha-clearing post-pass.
+
+4. The output of step 2 IS the final asset — save directly at the
+   requested output path.
+```
+
+The dispatcher will auto-inject this clause if the prompt contains keywords like `glow`, `luminous`, `neon`, `vfx`, `halo`, `particle`, `sparkle`, `radiance`, or their Korean equivalents (`글로우`, `발광`, `빛나는`, `네온`, etc.), OR if the prompt includes `--transparency=luminance`.
+
+**Caveat:** luminance alpha makes ALL dark pixels transparent. Intentionally dark subjects (black armor, dark backgrounds, shadows) will go semi-transparent. Use chroma-key (Method B) for those.
+
+### Method B — Chroma-key alpha (for flat / opaque-content sprites — default)
+
+For icons, items, characters, props, tilesets, and any flat-edged subject without large luminous glow regions, the chroma-key method remains the safe default:
 
 ```
 TRANSPARENT OUTPUT PIPELINE — these rules override any default behaviour:
@@ -670,7 +712,24 @@ TRANSPARENT OUTPUT PIPELINE — these rules override any default behaviour:
    running an alpha-clearing pass.
 ```
 
-The agent injects these 5 clauses INTO EVERY style-gen prompt whose item has `transparent: true` (which is most UI/sprite/icon items). This goes alongside the Atlas Strict Containment clauses (next section) — both are required for atlas items, the transparent clauses alone for non-atlas transparent items.
+The agent injects the chroma-key clauses INTO EVERY transparent style-gen prompt for flat / opaque content. For luminous content, inject the luminance clause from Method A instead. This goes alongside the Atlas Strict Containment clauses (next section) — both are required for atlas items, the transparent clauses alone for non-atlas transparent items.
+
+### Method-selection decision tree
+
+```
+Is the item transparent?
+├── No → skip both clauses entirely
+└── Yes
+    ├── Does the prompt describe glow / luminous / neon / VFX / halo / particles /
+    │   sparkle / radiance / 글로우 / 발광 / 빛나는 / 네온 / etc?
+    │   → Method A (luminance alpha)
+    └── Else (flat icon, character, item, tileset, prop)
+        → Method B (chroma key)
+```
+
+If unsure, prefer Method B (chroma key) — it works on any content. Method A is a specialization that produces much cleaner results on glow content but degrades dark intentional content.
+
+The user can override the auto-detection by adding `--transparency=luminance` / `--transparency=chroma` to the prompt; the dispatcher strips the flag and logs the chosen method to stderr.
 
 ### Why this matters
 
@@ -680,6 +739,8 @@ Without the explicit magenta key + stop-at-step-2 instruction, Codex defaults to
 - silently rescale and pad the canvas, drifting from the requested output dimensions
 
 By locking the chroma key to magenta and forbidding the destructive enforcement pass, we get: raw generation → alpha-extracted PNG → done. The asset preserves all the intentional decoration. Containment is then audited separately (via verify-atlas), and if the output bleeds across cells the agent regenerates with stricter prompt-level instructions — never by overwriting pixels.
+
+And for glow content where chroma-key would still leave colored fringes, Method A (luminance) removes the chroma key from the equation entirely — making clean luminous transparency feasible without per-asset color cleanup.
 
 ## Atlas Strict Containment Conventions (CRITICAL — auto-applied for all atlas/sheet items)
 
