@@ -979,6 +979,25 @@ The verifier exits 0 if clean, 1 if violations. Capture the JSON report. If `pas
 2. Append a stricter clause to the style-gen prompt — for each violated side, e.g. "INCREASE inner padding from the cell's top edge by another 16 pixels — current generation has cell {name} content starting at the cell's top edge with NO padding, which is forbidden".
 3. Regenerate. Repeat up to 3 attempts. If still failing after 3 attempts, mark the item as `failed_with_violations` in the manifest results, surface the issue to the user, and continue with the rest of the batch — do NOT silently accept a broken sheet.
 
+### Mandatory alignment gate after each atlas generation — `check-atlas` (NON-NEGOTIABLE)
+
+`verify-atlas` only checks safe-margin containment. It does NOT check the thing that actually breaks runtime state-swaps: whether every cell shares the SAME content size and the SAME center anchor. AI generators routinely draw atlas cells that drift 5–40 px in position and a few px in size — slicing such a sheet makes the sprite JUMP/JITTER when the engine swaps states (normal→hover→pressed) or plays frames. A uniform size + centered anchor is what makes the swap read as "one object reacting in place," not different images flashing.
+
+Therefore, after generation AND after the containment check, the agent MUST ALSO run `check-atlas` on EVERY atlas item — no exceptions:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-image.mjs" check-atlas "<saved-path>" --grid <cols>x<rows> [--cell-names <comma-separated>]
+```
+
+`check-atlas` is self-healing and mandatory:
+1. It measures per-cell content-center offset and content-size spread, prints a JSON report, and decides pass/fail against tolerances (center ≤ 2 px, size ≤ 2 px by default).
+2. If it PASSES, the atlas is engine-ready — continue.
+3. If it FAILS, it AUTOMATICALLY realigns with size normalization (every cell's content scaled to a canonical size and centered), writes `<name>_aligned.png`, then re-verifies and reports `FIXED`.
+4. The agent MUST then show the realigned output (the `_aligned.png`) to the user and use that file as the asset — never the drifted original.
+5. If it still fails after realign (`STILL FAILING`), the cells are probably not true variants of one element — surface this to the user and inspect manually.
+
+Do NOT skip this step for any multi-cell atlas. "It looks fine" is not sufficient — drift of a few px is invisible in a static sheet but obvious as jitter at runtime.
+
 ### Manifest schema extension for atlas items
 
 When the agent plans the asset list (step 2 above), atlas items in the manifest take this shape:
@@ -1028,6 +1047,7 @@ This keeps slicing under user control — they may want to inspect the sheet fir
 - Never modify the reference image. Never save the reference as an output artifact.
 - **For sprite sheet items: always include the Sprite Sheet Conventions above in the style-gen prompt, and run the verification step after generation.**
 - **For ANY atlas item (item with `atlas` field in manifest): always inject the Atlas Strict Containment clauses above into the style-gen prompt, run verify-atlas after generation, and regenerate up to 3 times if violations are found.**
+- **For ANY multi-cell atlas: ALWAYS run `check-atlas` after generation (mandatory, non-negotiable). It verifies every cell shares the same content size + center anchor and auto-realigns (with size normalization) if not. Show the realigned `_aligned.png` to the user and use it as the asset. A drifted atlas that "looks fine" statically will jump/jitter at runtime.**
 
 ## Cost note
 

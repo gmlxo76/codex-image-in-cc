@@ -721,6 +721,91 @@ function handleRealignAtlas(argv) {
   process.exitCode = result.status ?? 0;
 }
 
+function handleCheckAtlas(argv) {
+  // MANDATORY atlas gate: verify every cell shares the same content size + center
+  // anchor; if not, auto-realign with size normalization and re-verify. This is
+  // what makes a multi-cell atlas safe for runtime state-swaps (no jump/jitter).
+  const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "realign_atlas.py");
+  const py = process.platform === "win32" ? "python" : "python3";
+
+  // Lightweight flag parse — pull out what we need, pass the rest through.
+  const opts = { input: null, grid: null, output: null, alignBy: null, cellNames: null, noFix: false, tolerance: null, sizeTolerance: null };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--no-fix") opts.noFix = true;
+    else if (a === "--grid") opts.grid = argv[++i];
+    else if (a === "--output") opts.output = argv[++i];
+    else if (a === "--align-by") opts.alignBy = argv[++i];
+    else if (a === "--cell-names") opts.cellNames = argv[++i];
+    else if (a === "--tolerance") opts.tolerance = argv[++i];
+    else if (a === "--size-tolerance") opts.sizeTolerance = argv[++i];
+    else if (!a.startsWith("--") && opts.input === null) opts.input = a;
+  }
+  if (!opts.input || !opts.grid) {
+    console.error("Usage: check-atlas <atlas.png> --grid CxR [--align-by ring|bbox|centroid|none] [--cell-names a,b,...] [--output <path>] [--no-fix]");
+    process.exitCode = 2;
+    return;
+  }
+
+  const baseArgs = [opts.input, "--grid", opts.grid];
+  if (opts.alignBy) baseArgs.push("--align-by", opts.alignBy);
+  if (opts.tolerance) baseArgs.push("--tolerance", opts.tolerance);
+  if (opts.sizeTolerance) baseArgs.push("--size-tolerance", opts.sizeTolerance);
+
+  const runPy = (args, capture) => spawnSync(py, [scriptPath, ...args], capture
+    ? { encoding: "utf-8", windowsHide: true }
+    : { stdio: "inherit", windowsHide: true });
+
+  // 1) Check.
+  const check = runPy([...baseArgs, "--check"], true);
+  if (check.error && check.error.code === "ENOENT") {
+    console.error("check-atlas: Python interpreter not found. Install Python 3 + `pip install Pillow numpy scipy`.");
+    process.exitCode = 2;
+    return;
+  }
+  if (check.stdout) process.stdout.write(check.stdout);
+  if (check.stderr) process.stderr.write(check.stderr);
+
+  if (check.status === 0) {
+    console.log("\n[check-atlas] PASS — every cell shares the same size + center anchor. Engine-ready.");
+    process.exitCode = 0;
+    return;
+  }
+
+  console.log("\n[check-atlas] FAIL — cells drift in position/size (see spread above); not safe for state-swaps.");
+  if (opts.noFix) {
+    console.log("[check-atlas] --no-fix set; leaving atlas unmodified.");
+    process.exitCode = 1;
+    return;
+  }
+
+  // 2) Auto-realign with size normalization.
+  const out = opts.output || opts.input.replace(/\.png$/i, "") + "_aligned.png";
+  const fixArgs = [...baseArgs, "--normalize-size", "--output", out];
+  if (opts.cellNames) fixArgs.push("--cell-names", opts.cellNames);
+  console.log("[check-atlas] realigning with size normalization →", out);
+  const fix = runPy(fixArgs, false);
+  if ((fix.status ?? 1) !== 0) {
+    console.error("[check-atlas] realign failed.");
+    process.exitCode = fix.status ?? 1;
+    return;
+  }
+
+  // 3) Re-check the realigned output and report.
+  const recheckArgs = [out, "--grid", opts.grid];
+  if (opts.tolerance) recheckArgs.push("--tolerance", opts.tolerance);
+  if (opts.sizeTolerance) recheckArgs.push("--size-tolerance", opts.sizeTolerance);
+  const recheck = runPy([...recheckArgs, "--check"], true);
+  if (recheck.stdout) process.stdout.write(recheck.stdout);
+  if (recheck.status === 0) {
+    console.log(`\n[check-atlas] FIXED — realigned atlas passes. Use: ${out}`);
+    process.exitCode = 0;
+  } else {
+    console.log("\n[check-atlas] STILL FAILING after realign — cells may not be true variants of one element; inspect manually.");
+    process.exitCode = 1;
+  }
+}
+
 function handleStatus(argv) {
   const options = parseStatusOptions(argv);
   if (options.help) {
@@ -755,6 +840,10 @@ function usage() {
     "                                                      and writes per-atlas output dirs (one PNG per cell + atlas.json sidecar each).",
     "  verify-atlas <input.png> --grid CxR --safe-margin N [--cell-w N --cell-h N]",
     "                                                      Verify atlas sheet contents respect safe margin; reports violations",
+    "  check-atlas <atlas.png> --grid CxR [--align-by ...] [--cell-names ...] [--output <path>] [--no-fix]",
+    "                                                      MANDATORY atlas gate: verify every cell shares the same content size +",
+    "                                                      center anchor; if drifted, auto-realign (with size normalization) and",
+    "                                                      re-verify. Prevents runtime state-swap jump/jitter. Run on EVERY atlas.",
     "  organize <manifest.json> --output-dir <dir> [--no-sliced]",
     "                                                      Reorganize an asset-pipeline manifest into kind-first layout",
     "                                                      (atlas/<name>/, sprite-sheet/, tileset/{floor,objects}/, vfx-sheet/,",
@@ -822,6 +911,11 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === "organize") {
     handleOrganize(rest);
+    return;
+  }
+
+  if (command === "check-atlas") {
+    handleCheckAtlas(rest);
     return;
   }
 

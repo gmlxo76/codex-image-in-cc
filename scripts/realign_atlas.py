@@ -181,6 +181,74 @@ def shift_to_center(cell: Image.Image, anchor: tuple[float, float]) -> Image.Ima
     return out
 
 
+def content_bbox(cell: Image.Image, alpha_threshold: int = CENTROID_ALPHA):
+    """Return (x0, y0, x1, y1) tight bbox of pixels with alpha > threshold, or None."""
+    alpha = np.asarray(cell.split()[-1])
+    ys, xs = np.where(alpha > alpha_threshold)
+    if len(xs) == 0:
+        return None
+    return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
+
+def normalize_cell_size(cell: Image.Image, target_w: int, target_h: int,
+                        alpha_threshold: int = CENTROID_ALPHA) -> Image.Image:
+    """Scale the cell's tight content to (target_w, target_h) and paste centered.
+
+    Equalizes content SIZE across cells (translation alone cannot do this), so a
+    runtime state-swap shows no size jump. Near-identical variants scale by <2%,
+    which is visually imperceptible.
+    """
+    w, h = cell.size
+    bb = content_bbox(cell, alpha_threshold)
+    out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    if bb is None:
+        return out
+    inner = cell.crop(bb)
+    if inner.size != (target_w, target_h):
+        inner = inner.resize((max(1, target_w), max(1, target_h)), Image.LANCZOS)
+    paste_x = int(round((w - target_w) / 2.0))
+    paste_y = int(round((h - target_h) / 2.0))
+    out.alpha_composite(inner, (paste_x, paste_y))
+    return out
+
+
+def analyze_cells(cells: list[Image.Image], cw: int, ch: int,
+                  alpha_threshold: int = CENTROID_ALPHA) -> dict:
+    """Measure per-cell content center offset (from cell center) and content size.
+
+    Returns a report dict with per-cell stats plus the cross-cell spreads used to
+    decide pass/fail (max center drift, content width/height spread).
+    """
+    cell_center = (cw / 2.0, ch / 2.0)
+    per_cell = []
+    centers_x, centers_y, widths, heights = [], [], [], []
+    for i, cell in enumerate(cells):
+        bb = content_bbox(cell, alpha_threshold)
+        if bb is None:
+            per_cell.append({"index": i, "empty": True})
+            continue
+        x0, y0, x1, y1 = bb
+        ccx, ccy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        bw, bh = x1 - x0, y1 - y0
+        per_cell.append({
+            "index": i,
+            "content_center": [round(ccx, 1), round(ccy, 1)],
+            "center_offset": [round(ccx - cell_center[0], 1), round(ccy - cell_center[1], 1)],
+            "content_size": [bw, bh],
+        })
+        centers_x.append(ccx)
+        centers_y.append(ccy)
+        widths.append(bw)
+        heights.append(bh)
+    spread = {
+        "center_x": round(max(centers_x) - min(centers_x), 1) if centers_x else 0.0,
+        "center_y": round(max(centers_y) - min(centers_y), 1) if centers_y else 0.0,
+        "width": (max(widths) - min(widths)) if widths else 0,
+        "height": (max(heights) - min(heights)) if heights else 0,
+    }
+    return {"cells": per_cell, "spread": spread}
+
+
 def slice_atlas(atlas: Image.Image, cols: int, rows: int) -> list[Image.Image]:
     aw, ah = atlas.size
     cw, ch = aw // cols, ah // rows
@@ -237,6 +305,30 @@ def main(argv: list[str] | None = None) -> int:
         help="Write an atlas.json sidecar (cell coords) next to the output PNG.",
     )
     parser.add_argument("--quiet", action="store_true", help="Suppress per-cell stats.")
+    parser.add_argument(
+        "--check", action="store_true",
+        help=(
+            "Check-only mode: measure per-cell content center offset and size spread, "
+            "print a JSON report, and exit 1 if the atlas exceeds --tolerance / "
+            "--size-tolerance (0 = aligned). Writes no files."
+        ),
+    )
+    parser.add_argument(
+        "--normalize-size", action="store_true",
+        help=(
+            "When realigning, also scale each cell's content to a canonical size so "
+            "every cell is pixel-identical in BOTH position and size (not just centered). "
+            "Required for clean runtime state-swaps; translation alone cannot equalize size."
+        ),
+    )
+    parser.add_argument(
+        "--tolerance", type=float, default=2.0,
+        help="Max allowed cross-cell content-center spread in px before --check fails (default 2.0).",
+    )
+    parser.add_argument(
+        "--size-tolerance", type=int, default=2,
+        help="Max allowed cross-cell content width/height spread in px before --check fails (default 2).",
+    )
 
     args = parser.parse_args(argv)
 
@@ -258,12 +350,45 @@ def main(argv: list[str] | None = None) -> int:
     cw, ch = aw // cols, ah // rows
 
     cells = slice_atlas(atlas, cols, rows)
+
+    # --- Check-only mode: measure alignment/size uniformity, report, exit code. ---
+    if args.check:
+        report = analyze_cells(cells, cw, ch)
+        sp = report["spread"]
+        passed = (
+            sp["center_x"] <= args.tolerance
+            and sp["center_y"] <= args.tolerance
+            and sp["width"] <= args.size_tolerance
+            and sp["height"] <= args.size_tolerance
+        )
+        report["grid"] = {"cols": cols, "rows": rows, "cellW": cw, "cellH": ch}
+        report["tolerance"] = {"center": args.tolerance, "size": args.size_tolerance}
+        report["passed"] = passed
+        print(json.dumps(report, indent=2))
+        return 0 if passed else 1
+
+    # Canonical content size for --normalize-size: per-axis max across non-empty cells.
+    target_w = target_h = None
+    if args.normalize_size:
+        bws, bhs = [], []
+        for cell in cells:
+            bb = content_bbox(cell)
+            if bb is not None:
+                bws.append(bb[2] - bb[0])
+                bhs.append(bb[3] - bb[1])
+        if bws:
+            target_w, target_h = max(bws), max(bhs)
+
     aligned: list[Image.Image] = []
     anchors: list[tuple[float, float]] = []
     shifts: list[tuple[int, int]] = []
     for cell in cells:
         anchor = detect_anchor(cell, args.align_by)
-        aligned_cell = shift_to_center(cell, anchor)
+        if args.normalize_size and target_w is not None:
+            # Equalize size AND center in one step (anchor==content center after normalize).
+            aligned_cell = normalize_cell_size(cell, target_w, target_h)
+        else:
+            aligned_cell = shift_to_center(cell, anchor)
         anchors.append(anchor)
         shifts.append((int(round(cw / 2 - anchor[0])), int(round(ch / 2 - anchor[1]))))
         aligned.append(aligned_cell)

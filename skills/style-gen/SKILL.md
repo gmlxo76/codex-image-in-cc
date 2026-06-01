@@ -64,10 +64,16 @@ double-ring pressed state) are documented in
 Copy the skeleton and fill the placeholders for the user's specific request
 before invoking the dispatcher. Do NOT shortcut with vague phrasing.
 
-If a previously-generated atlas has already drifted, the fallback recovery
-command is `/codex-image:realign-atlas <atlas.png> --grid CxR --align-by ring`.
-This is a last resort — it works but loses a few px of quality from the integer
-shift; prefer fixing the prompt and regenerating.
+After generating ANY multi-cell atlas, ALWAYS run the mandatory alignment gate:
+`/codex-image:check-atlas <atlas.png> --grid CxR`. It verifies every cell shares
+the same content size + center anchor and, if they drift, AUTO-realigns with size
+normalization (writing `<name>_aligned.png`) and re-verifies. Use the realigned
+file as the asset. This is non-negotiable — a few px of drift is invisible in the
+static sheet but jumps/jitters at runtime when the engine swaps states. Prefer also
+fixing the prompt and regenerating, but `check-atlas` is the enforced safety net.
+
+(`/codex-image:realign-atlas` remains available as the lower-level realign primitive
+that `check-atlas` calls under the hood.)
 
 ## If the user is asking for a sprite sheet
 

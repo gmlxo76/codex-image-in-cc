@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.10] - 2026-06-01 — mandatory atlas alignment gate (`check-atlas`)
+
+### Added — `check-atlas` command (`scripts/codex-image.mjs`)
+
+- New **`check-atlas <atlas.png> --grid CxR [--align-by ...] [--cell-names ...] [--output <path>] [--no-fix]`** command: the mandatory, self-healing alignment gate for any multi-cell atlas. It (1) measures per-cell content-center offset and content-size spread, (2) prints a JSON pass/fail report against tolerances (center ≤ 2 px, size ≤ 2 px), (3) on failure AUTO-realigns with size normalization → writes `<name>_aligned.png`, then (4) re-verifies and reports `FIXED`/`STILL FAILING`. Exit 0 = engine-ready, 1 = could not align.
+- **Why:** `verify-atlas` only checked safe-margin containment — it never checked the thing that actually breaks runtime state-swaps: whether every cell shares the SAME size and SAME center anchor. AI generators drift cells 5–40 px in position and a few px in size; slicing such a sheet makes the sprite jump/jitter when the engine swaps states. A drifted atlas that "looks fine" statically is broken at runtime. This makes the alignment check enforced, not optional.
+
+### Added to `scripts/realign_atlas.py`
+
+- **`--check`** mode: measures cross-cell content-center / content-size spread, prints a JSON report, and exits non-zero past `--tolerance` (center, default 2.0 px) / `--size-tolerance` (default 2 px). Writes no files.
+- **`--normalize-size`** mode: when realigning, scales each cell's content to a canonical per-axis size and centers it, so every cell is pixel-identical in BOTH position and size (translation alone could only fix position, not size). Near-identical variants scale <2% — visually imperceptible.
+
+### Changed — skills
+
+- `skills/asset-pipeline/SKILL.md`: added a **"Mandatory alignment gate after each atlas generation — `check-atlas` (NON-NEGOTIABLE)"** section and a new Constraints bullet requiring `check-atlas` on every multi-cell atlas, with the realigned `_aligned.png` used as the asset.
+- `skills/style-gen/SKILL.md`: the post-generation atlas step now mandates `check-atlas` (auto-realign safety net) instead of describing `realign-atlas` as an optional last resort.
+
 ### Docs
 
 - `README.md` rewritten to cover 0.3.x–0.4.x scope: documents all seven slash commands (the previous README had stopped at `style-gen` and `asset-pipeline`), adds a "What asset-pipeline auto-injects" section summarizing screen-flow planning / layer separation / 9-slice / atlas strict containment + `verify-atlas` regen loop / per-kind convention blocks / transparent-output magenta-key pipeline / sample-first gate, adds a kind-first manifest schema table, adds a `slice` vs `organize` comparison, updates the fork notice to mention all four fork-added commands, and adds Python 3 + Pillow to Requirements.
