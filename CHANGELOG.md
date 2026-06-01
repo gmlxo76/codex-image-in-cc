@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.4.10] - 2026-06-01 — mandatory atlas alignment gate (`check-atlas`)
+## [0.4.11] - 2026-06-01 — `measure-first` skill (size every element before generating)
+
+### Added — `skills/measure-first/SKILL.md`
+
+- New **`/codex-image:measure-first`** skill: the mandatory sizing pass that runs BEFORE `asset-pipeline`/`style-gen` when turning a mockup/reference screen into game resources. Iron rule: no asset is generated until its pixel size is traced to a measured source value (a prefab RectTransform, a layout-group computation, or a measured crop of the reference) — never guess.
+- Encodes: resolve each GameObject → ITS OWN RectTransform and read values LITERALLY (naive name→RT parsers grab wrong duplicates and return wrong sizes); handle point vs stretch anchors and nested sub-prefab backgrounds; compute layout-group fit (N×child + spacing + padding vs container); measure reference images by cropping one element (don't eyeball); pick ONE consistent authoring scale for the whole set so children fit their containers; produce a sizing table and confirm before generating.
+- Carries forward verification gotchas: opaque-fill check (AI renders panels as translucent glass ~alpha 25 → sample center, regenerate or alpha-boost), `check-atlas` on every multi-cell atlas, and "match the mockup proportion, don't approximate."
+- **Why:** repeated size mistakes (a slot wider than its panel, wrong aspect vs the mockup, mismatched scales) came from guessing. This makes measure-first an explicit, reusable step.
 
 ### Added — `check-atlas` command (`scripts/codex-image.mjs`)
 
