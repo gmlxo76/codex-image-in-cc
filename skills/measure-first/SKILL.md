@@ -1,86 +1,82 @@
 ---
-description: Measure every UI element's exact size from the source prefab/layout/reference BEFORE generating any asset — never guess sizes. Run this before asset-pipeline / style-gen when turning a mockup or reference screen into game resources.
-argument-hint: '<reference-or-mockup-path> [<prefab/layout path or project context>]'
+description: When the user gives a reference/mockup they want replicated and asks to turn its on-screen elements into game resources, MEASURE every element's real pixel size from the mockup itself BEFORE generating — by detecting each element's exact boundary, never by guessing or arbitrary percentage crops. Run before asset-pipeline / style-gen.
+argument-hint: '<mockup-or-reference-path> [<target resolution or context>]'
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
 # Measure-First Resourcing (Codex Image)
 
-When the user shows a **mockup / reference image** and asks to turn the elements on that screen into **game resources** (sprites/atlases), you MUST measure each element's exact size from the source of truth FIRST. **Never guess sizes or proportions.** Guessed sizes produce assets that don't fit (a slot wider than its panel, a panel that can't hold N rows, a slot that's the wrong aspect vs the mockup). This skill is the mandatory sizing pass that runs *before* `/codex-image:asset-pipeline` or `/codex-image:style-gen`.
+The user shows a **mockup they like** and says "make this screen into resources." That mockup is the **source of truth** — you replicate IT. So you must measure each element's size **from the mockup itself**, accurately.
 
-## Iron rule
+## Iron rules
 
-> No asset is generated until its pixel size is traced to a measured source value — a prefab RectTransform, a layout-group computation, or a measured crop of the reference. If you catch yourself typing a size you didn't measure, stop and measure it.
+> 1. **Measure from the artifact the user wants replicated** (the mockup). Do not substitute another source for sizing.
+> 2. **NEVER arbitrary/percentage crops.** "crop the right 20%, that's probably the inventory" is forbidden — it slices through elements and produces garbage measurements. Every measured size MUST come from a *detected element boundary*.
+> 3. No asset is generated until its pixel size is traced to a measured boundary box.
 
-## Procedure
+## Method — measure elements from the mockup
 
-### 1. Identify the source of truth
-- **Engine prefab/layout exists** (Unity `.prefab`/`.unity`, Unreal `.uasset` export, web CSS/Figma spec): this is authoritative. Use it.
-- **Only a reference image**: measure pixels directly from the image (crop + inspect).
-- Usually BOTH: prefab gives the rects, the mockup gives the look/proportion. Reconcile them and tell the user when they conflict.
+### 1. Canvas = the full mockup at its real resolution
+Load the image, record `W×H`. All element coordinates/sizes are in this canvas. (If the game canvas differs, scale at the end — step 5.)
 
-### 2. Parse the prefab — resolve each GameObject to ITS OWN RectTransform
-Naive "find name → nearest RectTransform" parsers grab the wrong block when names repeat (`_ani`, `z_back`, `_back` appear many times) and silently return wrong sizes. Resolve properly:
+### 2. Detect each element's EXACT bounding box (don't eyeball, don't %-crop)
+Most game UIs draw elements with a consistent accent border (cyan/teal) and a frame color (gold). Detect by color mask → connected-component labeling → per-component bounding box. This finds cards, buttons, slots, panels precisely.
 
-1. Index every YAML doc by `&fileID`.
-2. For the target GameObject, read its `m_Component` list, find the component whose doc type is `224` (RectTransform).
-3. Read that RectTransform's **literal** `m_SizeDelta`, `m_AnchorMin`, `m_AnchorMax`, `m_AnchoredPosition`, `m_Father`.
-4. **Verify literally** — open the actual block and confirm the numbers; do not trust a one-pass dumper.
-
-Example resolver (Python, adapt as needed):
 ```python
-import re
-txt=open(PREFAB,encoding="utf-8").read()
-blocks=re.split(r'^--- !u!',txt,flags=re.M)[1:]
-byid={}
-for b in blocks:
-    m=re.match(r'(\d+)\s+&(\d+)',b)
-    if m: byid[m.group(2)]={'type':m.group(1),'b':b}
-def name(go): 
-    o=byid.get(go); return re.search(r'm_Name:\s*(.*)',o['b']).group(1).strip() if o else '?'
-for k,v in byid.items():
-    if v['type']=='1' and re.search(r'm_Name:\s*TARGET_NAME\b',v['b']):
-        for c in re.findall(r'component:\s*\{fileID:\s*(\d+)\}',v['b']):
-            o=byid.get(c)
-            if o and o['type']=='224':
-                sd=re.search(r'm_SizeDelta:\s*\{x:\s*([-\d.]+),\s*y:\s*([-\d.]+)\}',o['b'])
-                amin=re.search(r'm_AnchorMin:\s*\{x:\s*([-\d.]+),\s*y:\s*([-\d.]+)\}',o['b'])
-                amax=re.search(r'm_AnchorMax:\s*\{x:\s*([-\d.]+),\s*y:\s*([-\d.]+)\}',o['b'])
-                print(c, sd.groups(), amin.groups(), amax.groups())
+from PIL import Image, ImageDraw
+import numpy as np
+from scipy.ndimage import label
+im=Image.open(MOCKUP).convert("RGB"); A=np.asarray(im).astype(int); H,W,_=A.shape
+R,G,B=A[:,:,0],A[:,:,1],A[:,:,2]
+# accent-border mask (tune per art: this catches bright cyan/teal UI outlines)
+mask=((B-R)>40)&((G-R)>20)&(B>90)
+lbl,n=label(mask)
+boxes=[]
+for i in range(1,n+1):
+    ys,xs=np.where(lbl==i)
+    if len(xs)<200: continue
+    x0,x1,y0,y1=xs.min(),xs.max(),ys.min(),ys.max()
+    w,h=x1-x0+1,y1-y0+1
+    if w<60 or h<25: continue
+    if w>W*0.95 and h>H*0.95: continue
+    boxes.append((x0,y0,w,h))
+boxes.sort(key=lambda b:(b[1],b[0]))
+for x0,y0,w,h in boxes: print(f"x={x0} y={y0} W={w} H={h} ratio={w/h:.2f}")
+# self-verify: draw the boxes and READ the result image to confirm each box hugs one element
+dr=ImageDraw.Draw(im)
+for x0,y0,w,h in boxes: dr.rectangle([x0,y0,x0+w,y0+h],outline=(255,0,0),width=3)
+im.save(OUT_ANNOTATED)
 ```
+- For the **gold frame**: mask `(R>150)&(G>120)&(B<110)`, take its bbox for the outer frame and the inner-edge thickness.
+- For **filled/borderless** elements (a panel behind items, an icon): detect by its region color, or derive from the gap/inset relative to the bordered elements around it.
+- ALWAYS self-verify: render the annotated image and READ it; every red box must tightly enclose exactly one intended element. If a box merges two elements or clips one, tighten the mask / split and re-measure. Do not trust numbers you haven't visually confirmed hug the element.
 
-Notes on anchors:
-- `anchorMin == anchorMax` (a point) → `sizeDelta` IS the element's fixed pixel size.
-- `anchorMin != anchorMax` (stretch) → the element's size = parent size ± `sizeDelta`; you must resolve the parent's size (walk up until a fixed-size ancestor or the canvas reference resolution).
-- Note nested sub-prefabs: the visible slot/card background may be a child element (e.g. a `_z_back` inside an inner container), NOT the root cell rect. Find the element that actually carries the sprite.
+### 3. Identify & group the detected boxes
+Map each bbox to its role by position/size/ratio (e.g. 3 large ~0.66 boxes side by side = cards; a column of ~2.6 boxes on the right = inventory slots; wide-short ~4:1 boxes = buttons). Pick the representative size for each repeated element (they should match; if they differ by a few px that's AA noise — use the median).
 
-### 3. Establish the layout / coordinate system
-- Find layout groups (`VerticalLayoutGroup`/`HorizontalLayoutGroup`/`GridLayoutGroup`): read `m_Padding`, `m_Spacing`, `m_ChildAlignment`, `m_ChildControl*`, `m_ChildForceExpand*`, and the child count.
-- Compute the fit: e.g. *N children × childHeight + (N-1)×spacing + padding == container height?* State whether it fits exactly, overflows, or centers with slack.
-- Confirm every child fits inside its parent (panel must contain its slots; a row must not exceed the column width).
+### 4. Establish containment & relationships (all in canvas px)
+For each container→children: confirm children fit (card row width vs panel; N stacked slots vs inventory column height; slot vs its panel width). Record positions so the list-up preserves the mockup's layout.
 
-### 4. If measuring from the reference image
-- Crop the actual element out (PIL) and read its bounding box — don't eyeball the ratio.
-- For repeated elements (slots/cards), crop ONE and measure W×H, then derive the count/pitch.
-- When the prefab and mockup disagree on proportion, surface it and ask which wins (usually: follow the mockup's look, the prefab's rects).
+### 5. Choose ONE authoring scale and scale every element together
+Pick a single multiplier (commonly 2× the measured mockup px, or a factor that maps mockup canvas → target game resolution). Apply to EVERY asset so they stay consistent and children keep fitting their parents. Mixing scales is the classic bug (a slot ends up wider than its panel).
 
-### 5. Pick ONE consistent authoring scale
-Choose a single multiplier (commonly **2×** the UI point size) and apply it to EVERY asset in the set. Mixing scales (e.g. a 1.1× panel with 2× slots) makes children end up larger than their containers. Verify: at the chosen scale, does the child still fit the parent? (childW×scale < panelW×scale, N×childH×scale ≤ panelH×scale.)
+### 6. Reflect measured sizes in the resource list-up
+The deliverable is a resource list where EVERY size is the measured value (and its scaled author px):
 
-### 6. Produce a sizing table and CONFIRM before generating
-Present a table and get sign-off:
+| # | Resource | Role | Measured (mockup px) | Ratio | Author px (×scale) | Fits in | Notes |
+|---|---|---|---|---|---|---|---|
+| 1 | outer frame | gold bezel | 1168×655 (full) | — | … | screen | 9-slice |
+| 2 | card frame | shop card ×3 | 233×349 | 0.67 | 466×698 | shop panel | atlas default/selected |
+| 3 | buy button | ×3 | 202×47 | 4.30 | 404×94 | card | 9-slice 3-state |
+| 4 | inventory slot | ×6 | 196×74 | 2.65 | 392×148 | inven column | atlas empty/filled/hover |
+| … | … | … | … | … | … | … | … |
 
-| Element | Source (prefab rect / measured) | Author px (×scale) | Ratio | Fits in | Notes |
-|---|---|---|---|---|---|
-| panel | _layout_x 348×1092 | 696×2184 | 1:3.14 | screen | 9-slice |
-| slot  | obj_y 242×182 | 484×364 | 1.33:1 | panel (54% w, 6×=panel h) | atlas cell |
+Only after the list-up reflects the measured sizes do you proceed to `/codex-image:asset-pipeline` or `/codex-image:style-gen`, then `/codex-image:check-atlas` on every multi-cell atlas.
 
-Only after the user approves the table do you hand off to `/codex-image:asset-pipeline` (batch) or `/codex-image:style-gen` (single), then run `/codex-image:check-atlas` on every multi-cell atlas.
+## Carry-forward generation gotchas
+- **Opaque fill:** AI renders large panels/buttons as translucent glass (center alpha ≈ 25). Sample the center pixel; if alpha ≪ 255, regenerate with "SOLID MATTE FULLY OPAQUE … NOT glass" or alpha-boost the PNG (`alpha = clip(alpha×~12, 0, 255)`).
+- **Atlas alignment:** every multi-cell atlas must pass `check-atlas` (uniform cell size + centered anchor).
+- **Match the mockup proportion exactly:** reproduce the measured ratio. A 2.47:1 slot when the measured mockup slot is 2.65:1 (or 2:1) is a failure — use the measured number.
 
-## Verification gotchas (carry into generation)
-- **Opaque fill**: AI often renders large panels/buttons as translucent glass (center alpha ≈ 25). Sample the center pixel; if alpha << 255, regenerate with "SOLID MATTE FULLY OPAQUE … NOT glass" or alpha-boost the PNG (`alpha = clip(alpha×~12, 0, 255)`).
-- **Atlas alignment**: every multi-cell atlas must pass `check-atlas` (uniform cell size + centered anchor) or it jumps/jitters at runtime.
-- **Match the mockup, don't approximate**: if the user says "like the mockup," measure the mockup element and reproduce that proportion — a 2.47:1 slot when the mockup is 2:1 is a failure.
-
-## Output
-Always end the measurement pass with: the sizing table, the chosen scale, the fit-check math, and the list of assets to generate with their final pixel sizes. Then proceed to generation only on approval.
+## If instead modifying a live engine layout (not replicating a mockup)
+When the task is to fit a real prefab (Unity `.prefab`) rather than replicate a mockup, the RectTransforms are the size source: resolve each GameObject → ITS OWN RectTransform (type 224), read `m_SizeDelta`/anchors LITERALLY (naive name→RT parsers grab wrong duplicates), and compute layout-group fit. But when the user says "replicate this mockup," the mockup wins — measure it per the method above.

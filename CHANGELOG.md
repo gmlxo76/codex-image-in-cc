@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.12] - 2026-06-01 — `measure-first` rewritten: mockup-replication + boundary detection
+
+### Changed — `skills/measure-first/SKILL.md`
+
+- Rewrote the methodology around the real use case: **the user gives a mockup they want replicated** → the mockup IS the measurement source (not a substitute prefab). Measure each element's size FROM the mockup.
+- **Forbids arbitrary/percentage crops** (the failure that prompted this: "crop the right 20%, that's probably the inventory" slices through elements and yields garbage). Every measured size MUST come from a detected element boundary.
+- Adds the concrete detection technique: full mockup = canvas at its real resolution → color-mask the accent border (cyan/teal) and frame (gold) → `scipy.ndimage.label` connected components → per-component bounding box → filter by size → report each element's exact `W×H` and ratio. Includes the working script and a mandatory self-verify (draw the boxes, READ the annotated image, confirm each box hugs exactly one element).
+- Adds containment checks, single-authoring-scale rule, and a resource list-up table where every size is the MEASURED value + its scaled author px. Keeps the live-prefab RectTransform path as a secondary note for the modify-existing-UI case.
+- **Why:** repeated furious rejections came from guessing sizes / lazy percentage crops. This pins an exact, reproducible measure-from-mockup procedure.
+
 ## [0.4.11] - 2026-06-01 — `measure-first` skill (size every element before generating)
 
 ### Added — `skills/measure-first/SKILL.md`
