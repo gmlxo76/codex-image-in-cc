@@ -74,6 +74,8 @@ The deliverable is a resource list where EVERY size is the measured value (and i
 Only after the list-up reflects the measured sizes do you proceed to `/codex-image:asset-pipeline` or `/codex-image:style-gen`, then `/codex-image:check-atlas` on every multi-cell atlas.
 
 ## Carry-forward generation gotchas
+
+- **ASPECT-RATIO FIDELITY (mandatory):** the size you author IS the proportion the drawing must have. After every generation run `check-ratio "<path>" [--grid CxR]` — it fails if the drawn subject's aspect deviates from the requested cell/canvas aspect (e.g. an elongated bar inside a 2:1 cell). Margin/padding is fine; a proportion mismatch is not. Regenerate on failure.
 - **Opaque fill:** AI renders large panels/buttons as translucent glass (center alpha ≈ 25). Sample the center pixel; if alpha ≪ 255, regenerate with "SOLID MATTE FULLY OPAQUE … NOT glass" or alpha-boost the PNG (`alpha = clip(alpha×~12, 0, 255)`).
 - **Atlas alignment:** every multi-cell atlas must pass `check-atlas` (uniform cell size + centered anchor).
 - **Match the mockup proportion exactly:** reproduce the measured ratio. A 2.47:1 slot when the measured mockup slot is 2.65:1 (or 2:1) is a failure — use the measured number.

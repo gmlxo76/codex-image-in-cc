@@ -699,6 +699,20 @@ function runPythonSlice(argv, verifyOnly) {
   process.exitCode = result.status ?? 0;
 }
 
+function handleCheckRatio(argv) {
+  // Verify the DRAWN content's aspect ratio matches the requested cell/canvas ratio.
+  // Margin is fine; a proportion mismatch (elongated/wrong-aspect subject) fails -> regenerate.
+  const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "ratio_check.py");
+  const py = process.platform === "win32" ? "python" : "python3";
+  const result = spawnSync(py, [scriptPath, ...argv], { stdio: "inherit", windowsHide: true });
+  if (result.error && result.error.code === "ENOENT") {
+    console.error("check-ratio: Python interpreter not found. Install Python 3 + `pip install Pillow numpy`.");
+    process.exitCode = 2;
+    return;
+  }
+  process.exitCode = result.status ?? 0;
+}
+
 function handleRealignAtlas(argv) {
   const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "realign_atlas.py");
   const py = process.platform === "win32" ? "python" : "python3";
@@ -844,6 +858,10 @@ function usage() {
     "                                                      MANDATORY atlas gate: verify every cell shares the same content size +",
     "                                                      center anchor; if drifted, auto-realign (with size normalization) and",
     "                                                      re-verify. Prevents runtime state-swap jump/jitter. Run on EVERY atlas.",
+    "  check-ratio <input.png> [--grid CxR] [--tolerance 0.12]",
+    "                                                      MANDATORY after generation: verify the DRAWN content's aspect ratio",
+    "                                                      matches the requested cell/canvas ratio. Margin is fine; a proportion",
+    "                                                      mismatch (elongated/wrong-aspect subject) fails -> regenerate.",
     "  organize <manifest.json> --output-dir <dir> [--no-sliced]",
     "                                                      Reorganize an asset-pipeline manifest into kind-first layout",
     "                                                      (atlas/<name>/, sprite-sheet/, tileset/{floor,objects}/, vfx-sheet/,",
@@ -916,6 +934,11 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === "check-atlas") {
     handleCheckAtlas(rest);
+    return;
+  }
+
+  if (command === "check-ratio") {
+    handleCheckRatio(rest);
     return;
   }
 

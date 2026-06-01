@@ -6,6 +6,21 @@ allowed-tools: Bash(node:*)
 
 # Style-Reference Generate (Codex Image)
 
+## ⚠️ ASPECT-RATIO FIDELITY — NON-NEGOTIABLE (read first)
+
+When you request a canvas/output size, the SUBJECT THAT GETS DRAWN must share that aspect ratio. The size you pick IS the proportion the drawing must have — the model does NOT get to draw the subject at its own arbitrary proportion inside that canvas.
+
+- If you ask for `500x250` (2:1), the drawn element MUST be ~2:1. It must NOT come out as an elongated 2.7:1 bar, nor a near-square shape floating in the middle.
+- **Margin/padding around the subject is acceptable** — that is NOT the problem. The problem is the *proportion* of the drawn subject differing from the requested canvas proportion.
+- Always state the ratio explicitly in the prompt, e.g.: "the drawn element's aspect ratio MUST equal the canvas ratio (about 2:1); do not draw it elongated or at a different proportion; some transparent margin around it is fine."
+
+### Mandatory verification after every sized generation
+Immediately after the `SAVED:` line, run:
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-image.mjs" check-ratio "<saved-path>" [--grid CxR]
+```
+`check-ratio` measures the drawn content's bbox aspect per cell and compares it to the requested cell/canvas aspect. It exits 1 (with the per-cell deviations) if the proportion is off beyond tolerance. **If it fails, REGENERATE** with a stronger ratio clause (and, if needed, a smaller canvas matching the true subject proportion) — do not accept a wrong-proportion drawing. Margin alone never fails this check; only a proportion mismatch does.
+
 The first whitespace-separated token in the arguments is the **reference image path** (used as a style/composition/mood reference only — never edited or returned). The rest is the generation prompt describing the new subject and any size/output-path/quality details in natural language. Quote the path if it contains spaces (e.g. `"my reference.png" draw a coin in this style ...`).
 
 **Attached-image shortcut:** if the user attached an image via the chat UI instead of typing a path, `$ARGUMENTS` will start with a `[Image #N]` placeholder. The actual file path appears nearby in the message as image metadata: `[Image: source: <absolute-path>]`. Substitute the placeholder with that resolved path before invoking the dispatcher (the rest of `$ARGUMENTS` stays as the prompt).

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.13] - 2026-06-01 — `check-ratio`: drawn-content aspect-ratio fidelity gate
+
+### Added — `check-ratio` command + `scripts/ratio_check.py`
+
+- New **`check-ratio <input.png> [--grid CxR] [--tolerance 0.12]`**: verifies the DRAWN content's aspect ratio matches the requested cell/canvas aspect ratio. Measures each cell's non-transparent content bbox aspect and compares to the cell aspect; exits 1 (with per-cell deviations) if a cell's proportion is off beyond tolerance.
+- **Rule it enforces:** the size you request IS the proportion the drawing must have. The model must NOT draw the subject at its own arbitrary proportion inside the canvas (e.g. an elongated 2.7:1 bar inside a 2:1 cell). **Margin/padding around the subject is explicitly allowed** — only a proportion mismatch fails.
+
+### Changed — skills
+
+- `skills/style-gen/SKILL.md`: prominent "ASPECT-RATIO FIDELITY — NON-NEGOTIABLE" section at the top + mandatory `check-ratio` run after every sized generation, regenerate on failure.
+- `skills/measure-first/SKILL.md`: added the aspect-ratio-fidelity gotcha + `check-ratio` step.
+- **Why:** repeated failures where the requested canvas size was correct but the drawn subject came out at a different (too-elongated) proportion with odd margins. This makes "drawn ratio == requested ratio" an enforced, checkable rule.
+
 ## [0.4.12] - 2026-06-01 — `measure-first` rewritten: mockup-replication + boundary detection
 
 ### Changed — `skills/measure-first/SKILL.md`
