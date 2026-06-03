@@ -40,7 +40,7 @@ except ImportError as exc:  # pragma: no cover
     )
     sys.exit(2)
 
-ALPHA_THRESH = 8  # alpha above this counts as "content"
+ALPHA_THRESH = 16  # alpha above this counts as "content"
 
 
 def parse_grid(text: str):
@@ -77,6 +77,43 @@ def runs_of_true(flags: np.ndarray):
         else:
             i += 1
     return runs
+
+
+def clean_profile(flags: np.ndarray, min_run: int, min_gap: int):
+    """Despeckle a 1-D boolean content profile so chroma-key noise doesn't
+    fragment the grid. Order matters:
+      (1) OPEN  — drop content runs shorter than min_run (stray specks / key
+          artifacts). Done first so noise specks vanish regardless of how close
+          they sit to a real frame.
+      (2) CLOSE — fill interior transparent gaps shorter than min_gap (only
+          true hairline splits; kept tiny so thin-but-real gutters survive)."""
+    f = flags.copy()
+    n = len(f)
+    # 1) open: remove short content runs (noise)
+    i = 0
+    while i < n:
+        if f[i]:
+            j = i
+            while j < n and f[j]:
+                j += 1
+            if (j - i) < min_run:
+                f[i:j] = False
+            i = j
+        else:
+            i += 1
+    # 2) close short interior gaps (hairline splits only)
+    i = 0
+    while i < n:
+        if not f[i]:
+            j = i
+            while j < n and not f[j]:
+                j += 1
+            if i > 0 and j < n and (j - i) < min_gap:
+                f[i:j] = True
+            i = j
+        else:
+            i += 1
+    return f
 
 
 def content_bands(has_content: np.ndarray, count: int):
@@ -135,8 +172,16 @@ def main(argv=None):
     # Detect frame grid via gutters.
     col_has = region.any(axis=0)  # length rw
     row_has = region.any(axis=1)  # length rh
-    xbands, ok_x, n_cols = content_bands(col_has, cols)
-    ybands, ok_y, n_rows = content_bands(row_has, rows)
+    # Despeckle each profile (chroma-key noise fragments the grid otherwise).
+    # Thresholds are relative to the expected cell pitch.
+    col_cell = rw / cols
+    row_cell = rh / rows
+    # min_run drops noise specks (well below a real frame); min_gap only fuses
+    # hairline splits (kept tiny so thin real gutters are preserved).
+    col_clean = clean_profile(col_has, min_run=max(4, int(0.2 * col_cell)), min_gap=3)
+    row_clean = clean_profile(row_has, min_run=max(4, int(0.2 * row_cell)), min_gap=3)
+    xbands, ok_x, n_cols = content_bands(col_clean, cols)
+    ybands, ok_y, n_rows = content_bands(row_clean, rows)
     if not ok_x or not ok_y:
         emit({
             "status": "rework", "input": str(args.input), "grid": f"{cols}x{rows}",
