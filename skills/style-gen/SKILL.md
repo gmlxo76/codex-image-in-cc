@@ -6,6 +6,22 @@ allowed-tools: Bash(node:*)
 
 # Style-Reference Generate (Codex Image)
 
+## Sprite-sheet gate (CONDITIONAL — only for animation/sprite sheets)
+
+If — and ONLY if — what you generated is a **SPRITE SHEET / ANIMATION SHEET** (a
+uniform grid of animation frames meant to be sliced and played), you MUST run the
+strict `sheetfit` gate on the result and resolve it before the asset is done:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-image.mjs" sheetfit "<sheet.png>" --grid <CxR>
+```
+On `status: "rework"`, regenerate (label-free, transparent gutters, strict even grid,
+same scale per cell) and re-run until `"fixed"`/`"pass"`. See `/codex-image:sheetfit`.
+
+**For ALL OTHER image types — single illustrations, mockups, backgrounds, single
+icons, portraits, logos, photos, etc. — DO NOT run sheetfit.** It applies exclusively
+to multi-frame sprite sheets.
+
 ## ⚠️ ASPECT-RATIO FIDELITY — NON-NEGOTIABLE (read first)
 
 When you request a canvas/output size, the SUBJECT THAT GETS DRAWN must share that aspect ratio. The size you pick IS the proportion the drawing must have — the model does NOT get to draw the subject at its own arbitrary proportion inside that canvas.

@@ -735,6 +735,26 @@ function handleRealignAtlas(argv) {
   process.exitCode = result.status ?? 0;
 }
 
+function handleSheetfit(argv) {
+  // Strict animation sprite-sheet normalizer. Detects the true frame grid via
+  // transparent gutters (robust to uneven AI spacing), tightly trims each frame,
+  // sizes every cell identically, re-anchors consistently (bottom-center default),
+  // and recomposes into ONE engine-ready sheet. Adversarial: if it cannot find
+  // clean gutters or any cell is empty, it FAILS with status "rework".
+  // Output is a single sheet (NOT per-cell files) so Unity "Sprite Mode = Multiple
+  // -> Grid by Cell Count (cols x rows)" yields registered frames (no jump).
+  // Delegates entirely to scripts/sheetfit.py (Pillow + numpy).
+  const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "sheetfit.py");
+  const py = process.platform === "win32" ? "python" : "python3";
+  const result = spawnSync(py, [scriptPath, ...argv], { stdio: "inherit", windowsHide: true });
+  if (result.error && result.error.code === "ENOENT") {
+    console.error("sheetfit: Python interpreter not found. Install Python 3 + `pip install Pillow numpy`.");
+    process.exitCode = 2;
+    return;
+  }
+  process.exitCode = result.status ?? 0;
+}
+
 function handleCheckAtlas(argv) {
   // MANDATORY atlas gate: verify every cell shares the same content size + center
   // anchor; if not, auto-realign with size normalization and re-verify. This is
@@ -871,6 +891,11 @@ function usage() {
     "                                                      detected anchor (ring/bbox/centroid), recompose. Use when an AI-generated",
     "                                                      atlas has drifted cells. PREFER the prompt methodology in",
     "                                                      asset-pipeline SKILL.md to AVOID drift in the first place.",
+    "  sheetfit <sheet.png> --grid CxR [--anchor bottom|center] [--pad N] [--output <path>] [--check]",
+    "                                                      ANIMATION sheet fixer: detect the true frame grid via transparent gutters,",
+    "                                                      trim each frame, size every cell identically, re-anchor consistently, and",
+    "                                                      recompose into ONE engine-ready sheet (+ .sheet.json). STRICT: rejects",
+    "                                                      labels/uneven-grid/touching frames. Exit 1 = REWORK NEEDED (regenerate source).",
     "",
     "Each command is also exposed as a Claude Code plugin skill:",
     "  /codex-image:status",
@@ -879,6 +904,7 @@ function usage() {
     "  /codex-image:style-gen <reference-path> <...>",
     "  /codex-image:asset-pipeline <reference-path> <project context>   (orchestrates style-gen for a planned asset batch)",
     "  /codex-image:slice <input.png> <output-dir> <grid spec>          (slice atlas sheet into per-cell PNGs)",
+    "  /codex-image:sheetfit <sheet.png> <grid spec>                    (strictly normalize an animation sprite sheet into one engine-ready sheet)",
     "  /codex-image:organize <manifest.json> <target-dir>               (reorganize manifest into kind-first engine layout)"
   ].join("\n");
 }
@@ -944,6 +970,11 @@ async function main(argv = process.argv.slice(2)) {
 
   if (command === "realign-atlas") {
     handleRealignAtlas(rest);
+    return;
+  }
+
+  if (command === "sheetfit") {
+    handleSheetfit(rest);
     return;
   }
 

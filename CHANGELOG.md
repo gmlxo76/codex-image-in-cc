@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.14] - 2026-06-04 — `sheetfit`: strict animation sprite-sheet normalizer + conditional auto-gate
+
+### Added — `sheetfit` command + `skills/sheetfit/SKILL.md`
+
+- New **`sheetfit <sheet.png> --grid CxR [--align-by bbox|ring|centroid] [--tolerance 1.5] [--size-tolerance 2] [--output <path>] [--no-fix]`**: an animation sprite-sheet fixer. STRICTLY (adversarially) verifies every grid cell shares the SAME content size + center anchor; if not, normalizes size + position and recomposes the frames into **one corrected sheet**, then strictly re-verifies.
+- Output is a single **engine-ready sheet** (not per-cell files): Unity `Sprite Mode = Multiple → Grid by Cell Count (cols × rows)` yields frames that play registered with no jump/jitter.
+- Emits a machine-readable `SHEETFIT {json}` line with `status` (`pass` / `fixed` / `rework`), `output`, `cellWidth`, `cellHeight`. Exit 0 = engine-ready; **exit 1 = REWORK NEEDED** (regenerate the source sheet). Also writes a `<name>_fixed.sheet.json` sidecar (cols/rows/cellWidth/cellHeight/anchor) for engine import.
+- Implemented by new `scripts/sheetfit.py` (Pillow + numpy). Detects the TRUE frame grid via transparent GUTTERS projected over the full region (robust to uneven AI spacing — not a naive even split), then enforces STRICT checks: exactly `cols`×`rows` content bands AND uniform column-band widths. Labels, touching frames, or an uneven grid → `rework`. `--anchor bottom|center`, `--pad N`, `--check` (verify-only) supported.
+
+### Changed — generation skills (conditional auto-gate)
+
+- `skills/generate/SKILL.md`, `skills/style-gen/SKILL.md`, `skills/asset-pipeline/SKILL.md`: added a **CONDITIONAL** rule — **only** when the generated image is a sprite sheet / animation sheet (a uniform grid of animation frames), `sheetfit` MUST be run after generation and resolved (regenerate on `rework`). **All other image kinds (single illustrations, mockups, backgrounds, icons, portraits, logos, photos, tilesets, etc.) MUST NOT be passed through sheetfit.**
+- **Why:** AI draws each frame independently, so a straight grid-slice of an AI sprite sheet jitters. This makes "every animation frame is uniform size + anchor-aligned" an enforced, checkable gate — but scoped strictly to sprite sheets so it never touches ordinary images.
+
 ## [0.4.13] - 2026-06-01 — `check-ratio`: drawn-content aspect-ratio fidelity gate
 
 ### Added — `check-ratio` command + `scripts/ratio_check.py`

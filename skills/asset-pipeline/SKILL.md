@@ -8,6 +8,20 @@ allowed-tools: Bash(node:*)
 
 A higher-order orchestration of `/codex-image:style-gen`: given a locked style reference and a project context, plan the project's asset list, confirm with the user, then generate each asset in the same visual style.
 
+## Sprite-sheet gate (CONDITIONAL — only for animation/sprite-sheet items)
+
+For each generated item whose kind is a **sprite sheet / animation sheet** (a uniform
+grid of animation frames), you MUST run the strict `sheetfit` gate after generating it:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-image.mjs" sheetfit "<sheet.png>" --grid <CxR>
+```
+On `status: "rework"`, regenerate that sheet (label-free, transparent gutters, strict
+even grid, same scale per cell) and re-run until `"fixed"`/`"pass"`. See
+`/codex-image:sheetfit`. **Items of any other kind (single illustration, background,
+icon, mockup, tileset, etc.) MUST NOT be passed through sheetfit** — the gate is only
+for multi-frame sprite/animation sheets.
+
 ## Arguments
 
 - **First whitespace-separated token**: the **reference image path** (the locked style; quote if the path contains spaces).
