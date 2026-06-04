@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.15] - 2026-06-04 — `sheetfit`: strip leftover chroma-key residue
+
+### Fixed — `sheetfit` removes leftover key color
+
+- `scripts/sheetfit.py` now strips leftover chroma-key residue before processing via a new `--strip-key magenta|green|none` option (default `magenta`). Imperfect chroma keying can leave **opaque off-shade key pixels** (e.g. dark/desaturated magenta `(193,13,208,255)`) that exact-match keying misses; sheetfit zeroes their alpha using a hue-specific test (magenta = high R, high B, very low G < 90) so the subject's rosy cheeks / pink aura (G well above 90) are never touched.
+- Also prevents that residue from being counted as content during grid detection. Validated: all mochi sheets went from ~6.85% visible magenta to **0**.
+
 ## [0.4.14] - 2026-06-04 — `sheetfit`: strict animation sprite-sheet normalizer + conditional auto-gate
 
 ### Added — `sheetfit` command + `skills/sheetfit/SKILL.md`

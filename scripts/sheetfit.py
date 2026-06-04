@@ -51,6 +51,34 @@ def parse_grid(text: str):
     return int(parts[0]), int(parts[1])
 
 
+def strip_key_color(arr: np.ndarray, key: str) -> int:
+    """Zero the alpha of leftover chroma-key pixels that an imperfect key pass
+    left fully/partly opaque (off-shade magenta/green that exact-match keying
+    missed). Hue-specific so it never touches the subject:
+      magenta residue = high R, high B, very low G (G<90) — the subject's rosy
+      cheeks / pink aura keep G well above 90, so they are safe.
+    Returns the number of pixels cleared."""
+    if key == "none":
+        return 0
+    R = arr[:, :, 0].astype(np.int16)
+    G = arr[:, :, 1].astype(np.int16)
+    B = arr[:, :, 2].astype(np.int16)
+    if key == "magenta":
+        # Magenta/purple key residue: both R and B clearly exceed G, at ANY
+        # brightness (catches darkened residue like (113,36,117)). The decisive
+        # test is R ~= B (magenta is balanced red+blue): leftover key has small
+        # |R-B|, whereas the subject's rosy pink cheeks/aura are R >> B (large
+        # |R-B|) and so are preserved. Greens have G highest and are untouched.
+        m = (R > G + 22) & (B > G + 22) & (np.abs(R - B) < 35) & (R > 35) & (B > 35)
+    elif key == "green":
+        m = (G > R + 22) & (G > B + 22) & (np.abs(R - B) < 35) & (G > 35)
+    else:
+        return 0
+    m &= arr[:, :, 3] > 0
+    arr[m, 3] = 0
+    return int(m.sum())
+
+
 def content_mask(alpha: np.ndarray) -> np.ndarray:
     return alpha > ALPHA_THRESH
 
@@ -146,6 +174,8 @@ def main(argv=None):
                     help="How each frame is placed in its uniform cell (default: bottom-center).")
     ap.add_argument("--pad", type=int, default=4, help="Transparent padding inside each cell (px).")
     ap.add_argument("--check", action="store_true", help="Verify only; write nothing.")
+    ap.add_argument("--strip-key", choices=["magenta", "green", "none"], default="magenta",
+                    help="Remove leftover chroma-key residue of this hue before processing (default: magenta).")
     args = ap.parse_args(argv)
 
     cols, rows = args.grid
@@ -159,6 +189,9 @@ def main(argv=None):
 
     img = Image.open(args.input).convert("RGBA")
     arr = np.array(img)
+    stripped = strip_key_color(arr, args.strip_key)
+    if stripped:
+        print(f"[sheetfit] stripped {stripped} leftover {args.strip_key} key pixels")
     alpha = arr[:, :, 3]
     mask = content_mask(alpha)
 
