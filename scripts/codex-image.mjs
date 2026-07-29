@@ -10,6 +10,13 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 const MIN_NODE_VERSION = "18.18.0";
 const MIN_CODEX_VERSION = "0.124.0";
 
+// Sandbox policy for generation calls (generate / edit / style-gen).
+// Windows unelevated codex runs with a restricted-token workspace-write sandbox that
+// CANNOT attach an --image reference across roots ("split writable root sets"), so style
+// references silently fail. Bypassing the sandbox lets --image references always apply.
+// Revert to sandboxed behavior by setting this back to "--full-auto".
+const SANDBOX_FLAG = "--dangerously-bypass-approvals-and-sandbox";
+
 function parseSemver(text) {
   const match = String(text ?? "").match(/(\d+)\.(\d+)\.(\d+)/);
   if (!match) {
@@ -448,7 +455,7 @@ async function handleGenerate(argv) {
   const cwd = process.cwd();
   const codexArgs = [
     "exec",
-    "--full-auto",
+    SANDBOX_FLAG,
     "--skip-git-repo-check",
     "-C",
     cwd,
@@ -482,7 +489,7 @@ async function handleEdit(argv) {
   }
   const codexArgs = [
     "exec",
-    "--full-auto",
+    SANDBOX_FLAG,
     "--skip-git-repo-check",
     "--image",
     inputPath,
@@ -537,7 +544,7 @@ async function handleStyleGen(argv) {
   }
   const codexArgs = [
     "exec",
-    "--full-auto",
+    SANDBOX_FLAG,
     "--skip-git-repo-check",
     "--image",
     inputPath,

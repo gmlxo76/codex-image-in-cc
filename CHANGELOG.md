@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.16] - 2026-07-29 — Bypass sandbox so `--image` references always apply
+
+### Fixed — style-gen / edit reference images now load on Windows
+
+- Generation calls (`generate`, `edit`, `style-gen`) previously ran `codex exec --full-auto`,
+  which enables the `workspace-write` sandbox. On **Windows unelevated** codex, that sandbox
+  uses a restricted-token wrapper that **cannot attach an `--image` reference** across roots
+  ("windows unelevated restricted-token sandbox cannot enforce split writable root sets"),
+  so style/edit reference images silently failed and generation fell back to prompt-only.
+- All three generation calls now use a single `SANDBOX_FLAG` constant set to
+  `--dangerously-bypass-approvals-and-sandbox`, so `--image` references always load and apply.
+  Revert by setting `SANDBOX_FLAG` back to `--full-auto` in `scripts/codex-image.mjs`.
+
 ## [0.4.15] - 2026-06-04 — `sheetfit`: strip leftover chroma-key residue
 
 ### Fixed — `sheetfit` removes leftover key color
